@@ -71,6 +71,11 @@
     { "id": 67, "name": "Huawei", "ticker": null, "yahoo": null, "exchange": null, "country": "China", "cc": "CN", "lat": 22.6544, "lon": 114.0563, "aliases": ["Huawei", "וואווי", "חואווי", "هواوي", "Хуавэй", "华为"] },
     { "id": 68, "name": "ByteDance (TikTok)", "ticker": null, "yahoo": null, "exchange": null, "country": "China", "cc": "CN", "lat": 39.9822, "lon": 116.3078, "aliases": ["ByteDance", "TikTok", "טיקטוק", "تيك توك", "ТикТок", "字节跳动", "抖音"] },
     { "id": 69, "name": "Baykar", "ticker": null, "yahoo": null, "exchange": null, "country": "Turkey", "cc": "TR", "lat": 41.0745, "lon": 28.7905, "aliases": ["Baykar", "Bayraktar", "בייקאר", "ביירקטאר", "بايكار", "بيرقدار", "Байкар", "Байрактар"] },
-    { "id": 70, "name": "Netflix", "ticker": "NFLX", "yahoo": "NFLX", "exchange": "NASDAQ", "country": "United States", "cc": "US", "lat": 37.2586, "lon": -121.9623, "aliases": ["Netflix", "נטפליקס", "نتفليكس", "Нетфликс", "奈飞"] }
+    { "id": 70, "name": "Netflix", "ticker": "NFLX", "yahoo": "NFLX", "exchange": "NASDAQ", "country": "United States", "cc": "US", "lat": 37.2586, "lon": -121.9623, "aliases": ["Netflix", "נטפליקס", "نتفليكس", "Нетфликс", "奈飞"] },
+    { "id": 71, "name": "EMCO", "ticker": null, "yahoo": null, "exchange": null, "country": "Bulgaria", "cc": "BG", "lat": 42.8667, "lon": 25.5, "aliases": ["EMCO", "Emco", "ЕМКО", "אמקו"] },
+    { "id": 72, "name": "Arsenal AD", "ticker": null, "yahoo": null, "exchange": null, "country": "Bulgaria", "cc": "BG", "lat": 42.4258, "lon": 25.6345, "aliases": ["Arsenal AD", "Arsenal Kazanlak", "Арсенал"] },
+    { "id": 73, "name": "Kintex", "ticker": null, "yahoo": null, "exchange": null, "country": "Bulgaria", "cc": "BG", "lat": 42.6977, "lon": 23.3219, "aliases": ["Kintex", "Кинтекс"] },
+    { "id": 74, "name": "UkrOboronProm", "ticker": null, "yahoo": null, "exchange": null, "country": "Ukraine", "cc": "UA", "lat": 50.4501, "lon": 30.5234, "aliases": ["Ukroboronprom", "UkrOboronProm", "אוקרובורונפרום", "Укроборонпром"] },
+    { "id": 75, "name": "Antonov", "ticker": null, "yahoo": null, "exchange": null, "country": "Ukraine", "cc": "UA", "lat": 50.4501, "lon": 30.5234, "aliases": ["Antonov", "אנטנוב", "Антонов"] }
   ]
 }

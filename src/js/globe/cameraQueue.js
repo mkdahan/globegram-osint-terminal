@@ -65,6 +65,8 @@ export class CameraQueue {
       destination: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, height),
       duration: flyDuration,
       complete: () => {
+        // Only refresh the sticky card if this event is still the newest match
+        // (don't overwrite a newer message that arrived while we were flying).
         if (this.onArrive) this.onArrive(event, loc);
       },
     });

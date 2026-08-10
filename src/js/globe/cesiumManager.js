@@ -61,21 +61,20 @@ export class CesiumManager {
     this.viewer.timeline.zoomTo(start, stop);
 
     this.events = new Map(); // key -> {event, entities: [Entity]}
+    this.lastEvent = null; // last matched event (sticky card always shows this)
+    this.lastTarget = null;
     this.onLoadTicker = null; // callback(yahooSymbol) from corporate popup button
     this._popup = {
       el: document.getElementById('media-popup'),
       title: document.getElementById('media-popup-title'),
       body: document.getElementById('media-popup-body'),
       text: document.getElementById('media-popup-text'),
-      position: null, // Cartesian3
       key: null,
+      dismissed: false, // user closed it — reopen only on a new match
     };
     document.getElementById('media-popup-close').addEventListener('click', () => this.hidePopup());
 
-    // Keep the popup glued to its world position
-    this.viewer.scene.postRender.addEventListener(() => this._updatePopupScreenPosition());
-
-    // Click an entity -> reopen its popup
+    // Click an entity -> reopen its sticky card
     const handler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
     handler.setInputAction((movement) => {
       const picked = this.viewer.scene.pick(movement.position);
@@ -167,22 +166,36 @@ export class CesiumManager {
     this.events.set(event.key, { event, entities });
   }
 
-  /** Attach downloaded media to an already-shown popup, if it's still open. */
+  /** Attach downloaded media to the sticky card if it is showing this event. */
   attachMedia(key, filePath) {
     const rec = this.events.get(key);
     if (rec) rec.event.mediaPath = filePath;
-    if (this._popup.key === key) this._renderPopupMedia(rec.event);
+    if (this.lastEvent && this.lastEvent.key === key) {
+      this.lastEvent.mediaPath = filePath;
+    }
+    if (this._popup.key === key && !this._popup.dismissed) {
+      this._renderPopupMedia(this.lastEvent || (rec && rec.event));
+    }
   }
 
+  /**
+   * Show the sticky "latest match" card. Screen-fixed (not world-anchored),
+   * so it stays visible after the camera moves / queue finishes.
+   * New matches replace the content; it does not auto-hide.
+   */
   showPopup(event, target) {
+    if (!event || !target) return;
+    this.lastEvent = event;
+    this.lastTarget = target;
     const p = this._popup;
+    p.dismissed = false;
     p.key = event.key;
-    p.position = Cesium.Cartesian3.fromDegrees(target.lon, target.lat);
     p.title.textContent = `${target.name} — ${event.chatTitle}`;
     p.text.textContent = event.text ? event.text.slice(0, 400) : '';
     this._renderCorporateBadge(event, target);
     this._renderPopupMedia(event);
     p.el.classList.remove('hidden');
+    p.el.style.display = '';
   }
 
   /** Corporate badge: [Name] | Ticker | Flag + "Load chart" button. */
@@ -239,25 +252,10 @@ export class CesiumManager {
   }
 
   hidePopup() {
+    // Manual dismiss only — does not clear lastEvent, so a new match still works.
+    this._popup.dismissed = true;
     this._popup.el.classList.add('hidden');
-    this._popup.key = null;
-    this._popup.position = null;
     this._popup.body.innerHTML = '';
     document.getElementById('media-popup-corp').innerHTML = '';
-  }
-
-  _updatePopupScreenPosition() {
-    const p = this._popup;
-    if (!p.position || p.el.classList.contains('hidden')) return;
-    const transforms = Cesium.SceneTransforms;
-    const toWindow = transforms.worldToWindowCoordinates || transforms.wgs84ToWindowCoordinates;
-    const pos = toWindow.call(transforms, this.viewer.scene, p.position);
-    if (!pos) {
-      p.el.style.display = 'none';
-      return;
-    }
-    p.el.style.display = '';
-    p.el.style.left = `${pos.x}px`;
-    p.el.style.top = `${pos.y}px`;
   }
 }

@@ -231,29 +231,31 @@ button.mini { padding: 1px 7px; font-size: 12px; }
   padding: 4px 10px; border-radius: 20px;
 }
 
-/* media popup over globe */
+/* Sticky "latest match" card — screen-fixed in the globe pane (does not
+   follow the camera, so the last caught message stays visible). */
 #media-popup {
   position: absolute; z-index: 30;
-  width: 300px;
-  background: rgba(12, 16, 24, 0.95);
+  left: 12px;
+  bottom: 70px; /* above Cesium timeline/clock */
+  width: min(340px, calc(100% - 24px));
+  max-height: calc(100% - 100px);
+  overflow: auto;
+  background: rgba(12, 16, 24, 0.96);
   border: 1px solid var(--accent);
   border-radius: 8px;
-  overflow: hidden;
-  transform: translate(-50%, calc(-100% - 18px));
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
 }
-#media-popup::after {
-  content: '';
-  position: absolute; left: 50%; bottom: -8px;
-  transform: translateX(-50%);
-  border: 8px solid transparent;
-  border-bottom: none;
-  border-top: 8px solid var(--accent);
-}
 #media-popup-head {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
   padding: 6px 10px; font-size: 12px; font-weight: 700; color: var(--accent);
+  flex-wrap: wrap;
 }
+#media-popup-head .latest-label {
+  font-size: 9px; letter-spacing: 1.2px; color: var(--amber);
+  border: 1px solid var(--amber); border-radius: 3px; padding: 0 5px;
+  flex-shrink: 0;
+}
+#media-popup-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #media-popup-close { background: none; border: none; color: var(--dim); font-size: 16px; padding: 0 4px; }
 #media-popup-body video, #media-popup-body img { width: 100%; display: block; background: #000; max-height: 190px; object-fit: contain; }
 #media-popup-body .placeholder { padding: 14px; font-size: 11px; color: var(--dim); text-align: center; }

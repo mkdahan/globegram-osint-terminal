@@ -25,8 +25,10 @@ const SECRETS_PATH = path.join(DATA_DIR, 'secrets.json');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const SESSION_PATH = path.join(DATA_DIR, 'session.txt');
 const GAZETTEER_PATH = path.join(DATA_DIR, 'gazetteer.json');
+const BUNDLED_GAZETTEER_PATH = path.join(ROOT, 'main', 'geocoder', 'bundled-gazetteer.json');
 const SEED_GAZETTEER_PATH = path.join(ROOT, 'main', 'geocoder', 'seed-gazetteer.json');
 const COMPANIES_PATH = path.join(DATA_DIR, 'companies.json');
+const BUNDLED_COMPANIES_PATH = path.join(ROOT, 'main', 'corporate', 'bundled-companies.json');
 const SEED_COMPANIES_PATH = path.join(ROOT, 'main', 'corporate', 'seed-companies.json');
 
 function ensureDataDirs() {
@@ -43,8 +45,10 @@ module.exports = {
   SETTINGS_PATH,
   SESSION_PATH,
   GAZETTEER_PATH,
+  BUNDLED_GAZETTEER_PATH,
   SEED_GAZETTEER_PATH,
   COMPANIES_PATH,
+  BUNDLED_COMPANIES_PATH,
   SEED_COMPANIES_PATH,
   ensureDataDirs,
 };

@@ -16,7 +16,7 @@
 'use strict';
 
 const fs = require('fs');
-const { GAZETTEER_PATH, SEED_GAZETTEER_PATH } = require('../paths');
+const { GAZETTEER_PATH, BUNDLED_GAZETTEER_PATH, SEED_GAZETTEER_PATH } = require('../paths');
 
 const HEBREW_PREFIXES = ['ו', 'ב', 'ל', 'מ', 'כ', 'ש', 'ה'];
 const ARABIC_PREFIXES = ['و', 'ب', 'ل', 'ف', 'ك'];
@@ -46,21 +46,57 @@ class GeonamesParser {
   }
 
   load() {
+    // Preference: locally rebuilt full DB → repo-bundled world DB → tiny seed
+    // Always merge curated seed on top (Tryavna, Kiryat Gat, Hebrew aliases, …).
     let raw = null;
     if (fs.existsSync(GAZETTEER_PATH)) {
       raw = JSON.parse(fs.readFileSync(GAZETTEER_PATH, 'utf-8'));
-      this.source = 'geonames-full';
+      this.source = 'geonames-full+seed';
+    } else if (fs.existsSync(BUNDLED_GAZETTEER_PATH)) {
+      raw = JSON.parse(fs.readFileSync(BUNDLED_GAZETTEER_PATH, 'utf-8'));
+      this.source = 'bundled+seed';
     } else {
       raw = JSON.parse(fs.readFileSync(SEED_GAZETTEER_PATH, 'utf-8'));
       this.source = 'seed';
     }
-    this.entries = raw.entries || [];
+    this.entries = this._mergeSeed(raw.entries || [], SEED_GAZETTEER_PATH, 'entries');
     this._buildIndex();
     console.log(
       `[geocoder] loaded ${this.entries.length} locations ` +
       `(${this.nameIndex.size} names, ${this.cjkNames.length} CJK) from ${this.source}`
     );
     return this;
+  }
+
+  _mergeSeed(base, seedPath, key) {
+    if (!fs.existsSync(seedPath) || seedPath.includes('bundled')) return base;
+    let seed;
+    try {
+      seed = JSON.parse(fs.readFileSync(seedPath, 'utf-8'))[key] || [];
+    } catch {
+      return base;
+    }
+    if (!seed.length) return base;
+    const byId = new Map(base.map((e) => [e.id, { ...e, names: [...(e.names || [])] }]));
+    const norm = (s) => String(s || '').toLowerCase();
+    for (const e of seed) {
+      if (!byId.has(e.id)) {
+        byId.set(e.id, { ...e, names: [...(e.names || [])] });
+        continue;
+      }
+      const cur = byId.get(e.id);
+      const same =
+        norm(cur.name) === norm(e.name) ||
+        (cur.names || []).some((n) => norm(n) === norm(e.name)) ||
+        (e.names || []).some((n) => norm(n) === norm(cur.name));
+      if (same) {
+        cur.names = [...new Set([...(cur.names || []), ...(e.names || []), e.name])];
+      } else {
+        // Seed id collided with a different GeoNames place — keep both
+        byId.set(`seed:${e.name}:${e.id}`, { ...e, names: [...(e.names || [])] });
+      }
+    }
+    return [...byId.values()];
   }
 
   _buildIndex() {
@@ -85,21 +121,22 @@ class GeonamesParser {
     this.cjkNames.sort((a, b) => b.name.length - a.name.length);
   }
 
-  /** @returns [{lat, lon, name, matchedWord, cc, pop, geonameid}] */
+  /** @returns [{lat, lon, name, matchedWord, cc, pop, geonameid}] — first-in-text order */
   match(text) {
     if (!text || !this.entries.length) return [];
-    const found = new Map(); // entryIdx -> matchedWord
+    const found = new Map(); // entryIdx -> {matchedWord, order}
 
     // --- token/n-gram pass ---
     const norm = normalize(text);
     const tokens = norm.match(TOKEN_RE) || [];
+    let order = 0;
     for (let i = 0; i < tokens.length; i++) {
       for (let n = MAX_NGRAM; n >= 1; n--) {
         if (i + n > tokens.length) continue;
         const phrase = tokens.slice(i, i + n).join(' ');
         const idx = this._lookup(phrase, n === 1);
         if (idx !== undefined && !found.has(idx)) {
-          found.set(idx, phrase);
+          found.set(idx, { matchedWord: phrase, order: order++ });
         }
       }
     }
@@ -107,25 +144,31 @@ class GeonamesParser {
     // --- CJK substring pass ---
     if (CJK_RE.test(text)) {
       for (const { name, idx } of this.cjkNames) {
-        if (!found.has(idx) && text.includes(name)) found.set(idx, name);
+        if (!found.has(idx) && text.includes(name)) {
+          found.set(idx, { matchedWord: name, order: order++ });
+        }
       }
     }
 
-    const results = [];
-    for (const [idx, matchedWord] of found) {
-      const e = this.entries[idx];
-      results.push({
-        geonameid: e.id,
-        name: e.name,
-        matchedWord,
-        lat: e.lat,
-        lon: e.lon,
-        cc: e.cc || null,
-        pop: e.pop || 0,
-      });
-      if (results.length >= MAX_MATCHES_PER_MESSAGE) break;
-    }
-    results.sort((a, b) => b.pop - a.pop);
+    const results = [...found.entries()]
+      .map(([idx, { matchedWord, order: o }]) => {
+        const e = this.entries[idx];
+        return {
+          geonameid: e.id,
+          name: e.name,
+          matchedWord,
+          lat: e.lat,
+          lon: e.lon,
+          cc: e.cc || null,
+          pop: e.pop || 0,
+          _order: o,
+        };
+      })
+      // Prefer earlier mentions (story location), then higher population as tie-break
+      .sort((a, b) => a._order - b._order || b.pop - a.pop)
+      .slice(0, MAX_MATCHES_PER_MESSAGE);
+
+    for (const r of results) delete r._order;
     return results;
   }
 

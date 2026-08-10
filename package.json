@@ -6,7 +6,9 @@
   "scripts": {
     "start": "electron .",
     "build-gazetteer": "node scripts/downloadGeonames.js",
-    "build-companies": "node scripts/downloadCompanies.js"
+    "build-companies": "node scripts/downloadCompanies.js",
+    "bundle-databases": "node scripts/bundleDatabases.js",
+    "build-all": "npm run build-gazetteer && npm run build-companies && npm run bundle-databases"
   },
   "license": "MIT",
   "devDependencies": {

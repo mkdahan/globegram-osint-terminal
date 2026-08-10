@@ -12,7 +12,7 @@
 'use strict';
 
 const fs = require('fs');
-const { COMPANIES_PATH, SEED_COMPANIES_PATH } = require('../paths');
+const { COMPANIES_PATH, BUNDLED_COMPANIES_PATH, SEED_COMPANIES_PATH } = require('../paths');
 const { normalize } = require('../geocoder/geonamesParser');
 
 const CJK_RE = /[\u3400-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF]/;
@@ -39,21 +39,53 @@ class CompanyParser {
   }
 
   load() {
+    // Preference: locally rebuilt full DB → repo-bundled world DB → tiny seed
+    // Always merge curated seed (EMCO, Elbit, Baykar, …) so OSINT names survive.
     let raw;
     if (fs.existsSync(COMPANIES_PATH)) {
       raw = JSON.parse(fs.readFileSync(COMPANIES_PATH, 'utf-8'));
-      this.source = 'wikidata-full';
+      this.source = 'wikidata-full+seed';
+    } else if (fs.existsSync(BUNDLED_COMPANIES_PATH)) {
+      raw = JSON.parse(fs.readFileSync(BUNDLED_COMPANIES_PATH, 'utf-8'));
+      this.source = 'bundled+seed';
     } else {
       raw = JSON.parse(fs.readFileSync(SEED_COMPANIES_PATH, 'utf-8'));
       this.source = 'seed';
     }
-    this.companies = raw.companies || [];
+    this.companies = this._mergeSeed(raw.companies || []);
     this._buildIndex();
     console.log(
       `[companies] loaded ${this.companies.length} companies ` +
       `(${this.nameIndex.size} aliases, ${this.cjkNames.length} CJK) from ${this.source}`
     );
     return this;
+  }
+
+  _mergeSeed(base) {
+    if (!fs.existsSync(SEED_COMPANIES_PATH)) return base;
+    let seed;
+    try {
+      seed = JSON.parse(fs.readFileSync(SEED_COMPANIES_PATH, 'utf-8')).companies || [];
+    } catch {
+      return base;
+    }
+    const keyOf = (c) =>
+      (c.ticker && String(c.ticker).toUpperCase()) ||
+      String(c.name || '').toLowerCase();
+    const byKey = new Map(base.map((c) => [keyOf(c), { ...c, aliases: [...(c.aliases || [])] }]));
+    for (const c of seed) {
+      const k = keyOf(c);
+      if (!byKey.has(k)) {
+        byKey.set(k, { ...c, aliases: [...(c.aliases || [])] });
+      } else {
+        const cur = byKey.get(k);
+        cur.aliases = [...new Set([...(cur.aliases || []), ...(c.aliases || []), c.name, c.ticker].filter(Boolean))];
+        if (!cur.yahoo && c.yahoo) cur.yahoo = c.yahoo;
+        if (!cur.ticker && c.ticker) cur.ticker = c.ticker;
+        if (!cur.lat && c.lat) { cur.lat = c.lat; cur.lon = c.lon; }
+      }
+    }
+    return [...byKey.values()];
   }
 
   _buildIndex() {
@@ -80,47 +112,52 @@ class CompanyParser {
 
   /**
    * @returns [{type:'COMPANY_MATCH', companyName, ticker, yahoo, exchange,
-   *            country, countryCode, lat, lon, matchedWord}]
+   *            country, countryCode, lat, lon, matchedWord}] — first-in-text order
    */
   match(text) {
     if (!text || !this.companies.length) return [];
-    const found = new Map(); // idx -> matchedWord
+    const found = new Map(); // idx -> {matchedWord, order}
 
     const norm = normalize(text);
     const tokens = norm.match(TOKEN_RE) || [];
+    let order = 0;
     for (let i = 0; i < tokens.length; i++) {
       for (let n = MAX_NGRAM; n >= 1; n--) {
         if (i + n > tokens.length) continue;
         const phrase = tokens.slice(i, i + n).join(' ');
         const idx = this._lookup(phrase, n === 1);
-        if (idx !== undefined && !found.has(idx)) found.set(idx, phrase);
+        if (idx !== undefined && !found.has(idx)) {
+          found.set(idx, { matchedWord: phrase, order: order++ });
+        }
       }
     }
 
     if (CJK_RE.test(text)) {
       for (const { name, idx } of this.cjkNames) {
-        if (!found.has(idx) && text.includes(name)) found.set(idx, name);
+        if (!found.has(idx) && text.includes(name)) {
+          found.set(idx, { matchedWord: name, order: order++ });
+        }
       }
     }
 
-    const results = [];
-    for (const [idx, matchedWord] of found) {
-      const c = this.companies[idx];
-      results.push({
-        type: 'COMPANY_MATCH',
-        companyName: c.name,
-        ticker: c.ticker || null,
-        yahoo: c.yahoo || null,
-        exchange: c.exchange || null,
-        country: c.country,
-        countryCode: c.cc,
-        lat: c.lat,
-        lon: c.lon,
-        matchedWord,
+    return [...found.entries()]
+      .sort((a, b) => a[1].order - b[1].order)
+      .slice(0, MAX_MATCHES)
+      .map(([idx, { matchedWord }]) => {
+        const c = this.companies[idx];
+        return {
+          type: 'COMPANY_MATCH',
+          companyName: c.name,
+          ticker: c.ticker || null,
+          yahoo: c.yahoo || null,
+          exchange: c.exchange || null,
+          country: c.country,
+          countryCode: c.cc,
+          lat: c.lat,
+          lon: c.lon,
+          matchedWord,
+        };
       });
-      if (results.length >= MAX_MATCHES) break;
-    }
-    return results;
   }
 
   _lookup(phrase, allowMorph) {

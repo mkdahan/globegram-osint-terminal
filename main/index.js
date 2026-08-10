@@ -41,7 +41,9 @@ chats.onEvent = async (payload) => {
   const locations = watch.places !== false ? geocoder.match(payload.text) : [];
   const companies = watch.companies !== false ? companyParser.match(payload.text) : [];
 
-  // Unified geo-event targets: geographic locations first (primary), then company HQs
+  // Unified geo-event targets, ordered by first appearance in the message
+  // (so "EMCO בבולגריה" flies to EMCO/Bulgaria, not a later "Ukraine" mention).
+  const lowerText = (payload.text || '').toLowerCase();
   const targets = [
     ...locations.map((l) => ({
       kind: 'place',
@@ -50,6 +52,7 @@ chats.onEvent = async (payload) => {
       lon: l.lon,
       cc: l.cc,
       matchedWord: l.matchedWord,
+      _pos: lowerText.indexOf(String(l.matchedWord || '').toLowerCase()),
     })),
     ...companies.map((c) => ({
       kind: 'company',
@@ -62,8 +65,12 @@ chats.onEvent = async (payload) => {
       yahoo: c.yahoo,
       exchange: c.exchange,
       matchedWord: c.matchedWord,
+      _pos: lowerText.indexOf(String(c.matchedWord || '').toLowerCase()),
     })),
-  ];
+  ]
+    .map((t, i) => ({ ...t, _pos: t._pos < 0 ? 1e9 + i : t._pos }))
+    .sort((a, b) => a._pos - b._pos)
+    .map(({ _pos, ...t }) => t);
 
   const event = {
     ...payload,

@@ -14,7 +14,9 @@ const $ = (id) => document.getElementById(id);
 const globe = new CesiumManager('cesiumContainer');
 const charts = new ChartManager($('charts-grid'), (unixMs) => sync.onChartClick(unixMs));
 const sync = new TimeSync(globe, charts);
-const cameraQueue = new CameraQueue(globe, (event, loc) => globe.showPopup(event, loc));
+// Camera only flies — sticky "latest match" card is owned by the event stream
+// so older queued flights never overwrite a newer message.
+const cameraQueue = new CameraQueue(globe, null);
 
 // Corporate popup "Load <TICKER> chart" button
 globe.onLoadTicker = (yahoo) => charts.addChart(yahoo);
@@ -229,6 +231,9 @@ window.api.events.onTelegramEvent((event) => {
   const targets = event.targets || [];
   if (targets.length) {
     globe.addEvent(event);
+    // Sticky card updates immediately so the last match never disappears
+    // while the camera queue is still flying / waiting.
+    globe.showPopup(event, targets[0]);
     cameraQueue.push(event);
     charts.addEventMarker(event);
     if (settings.alarms) fireAlarm(event);

@@ -1,10 +1,13 @@
 /**
  * Build the full multilingual GeoNames gazetteer.
  *
- * Downloads cities15000.zip (~2 MB) and alternateNamesV2.zip (~190 MB) from
+ * Downloads cities15000.zip, countryInfo.txt, and alternateNamesV2.zip from
  * download.geonames.org, streams through them, and writes a compact JSON
  * gazetteer to %LOCALAPPDATA%\globegram-terminal\gazetteer.json
  * (kept OUTSIDE the repo — it is large and regenerable).
+ *
+ * Countries are included (so "Bulgaria" / "בולגריה" match) using each country's
+ * capital coordinates from cities15000 when available.
  *
  * Kept languages: en, he, ar, ru, zh, de  (+ canonical/ascii names).
  * Population filter: cities15000 already guarantees pop >= 15000, which
@@ -30,6 +33,7 @@ const CJK_RE = /[\u3400-\u9FFF\uF900-\uFAFF]/;
 const TMP_DIR = path.join(os.tmpdir(), 'globegram-geonames');
 
 const CITIES_URL = 'https://download.geonames.org/export/dump/cities15000.zip';
+const COUNTRY_URL = 'https://download.geonames.org/export/dump/countryInfo.txt';
 const ALT_URL = 'https://download.geonames.org/export/dump/alternateNamesV2.zip';
 
 function download(url, dest) {
@@ -72,16 +76,28 @@ function download(url, dest) {
   });
 }
 
-/** Stream every line of the first .txt entry inside a zip file. */
+/**
+ * Stream every line of the main data .txt inside a zip.
+ * Skips readme / iso-languagecodes sidecar files (alternateNamesV2.zip
+ * ships those first — previously we stopped after the sidecar and kept 0 names).
+ */
 function eachZipLine(zipPath, onLine) {
   return new Promise((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: true }, (err, zip) => {
       if (err) return reject(err);
+      let opened = false;
       zip.readEntry();
       zip.on('entry', (entry) => {
-        if (!entry.fileName.endsWith('.txt') || entry.fileName.includes('readme')) {
-          return zip.readEntry();
-        }
+        const name = (entry.fileName || '').toLowerCase();
+        const skip =
+          !name.endsWith('.txt') ||
+          name.includes('readme') ||
+          name.includes('iso-language') ||
+          name.includes('languagecode');
+        if (skip) return zip.readEntry();
+        if (opened) return zip.readEntry(); // already streaming the main file
+        opened = true;
+        console.log(`  reading zip entry: ${entry.fileName}`);
         zip.openReadStream(entry, (err2, stream) => {
           if (err2) return reject(err2);
           const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -93,6 +109,9 @@ function eachZipLine(zipPath, onLine) {
           rl.on('error', reject);
         });
       });
+      zip.on('end', () => {
+        if (!opened) reject(new Error(`No data .txt found in ${zipPath}`));
+      });
       zip.on('error', reject);
     });
   });
@@ -102,13 +121,16 @@ async function main() {
   fs.mkdirSync(TMP_DIR, { recursive: true });
   fs.mkdirSync(DATA_DIR, { recursive: true });
 
-  console.log('[1/4] Downloading GeoNames dumps');
+  console.log('[1/5] Downloading GeoNames dumps');
   const citiesZip = await download(CITIES_URL, path.join(TMP_DIR, 'cities15000.zip'));
+  const countryTxt = await download(COUNTRY_URL, path.join(TMP_DIR, 'countryInfo.txt'));
   const altZip = await download(ALT_URL, path.join(TMP_DIR, 'alternateNamesV2.zip'));
 
-  console.log('[2/4] Parsing cities15000 (population-filtered cities)');
+  console.log('[2/5] Parsing cities15000 (population-filtered cities)');
   /** geonameid -> entry */
   const cities = new Map();
+  /** lowercase capital name -> {lat,lon} for country placement */
+  const capitalCoords = new Map();
   await eachZipLine(citiesZip, (line) => {
     const f = line.split('\t');
     if (f.length < 15) return;
@@ -123,10 +145,43 @@ async function main() {
     const names = new Set();
     if (ascii && ascii !== name) names.add(ascii);
     cities.set(id, { id, name, lat, lon, cc, pop, names });
+    capitalCoords.set(name.toLowerCase(), { lat, lon });
+    if (ascii) capitalCoords.set(ascii.toLowerCase(), { lat, lon });
   });
   console.log(`  ${cities.size} cities loaded`);
 
-  console.log('[3/4] Streaming alternateNamesV2 (multilingual names: en/he/ar/ru/zh/de)');
+  console.log('[3/5] Parsing countryInfo (countries so "Bulgaria"/"בולגריה" match)');
+  let countriesAdded = 0;
+  const countryLines = fs.readFileSync(countryTxt, 'utf-8').split(/\r?\n/);
+  for (const line of countryLines) {
+    if (!line || line.startsWith('#')) continue;
+    const f = line.split('\t');
+    // ISO, ISO3, ISO-Numeric, fips, Country, Capital, Area, Population, Continent, ..., geonameid
+    if (f.length < 17) continue;
+    const cc = f[0];
+    const name = f[4];
+    const capital = f[5];
+    const pop = Number(f[7]) || 0;
+    const id = Number(f[16]);
+    if (!id || !name || cities.has(id)) continue;
+    const coords =
+      (capital && capitalCoords.get(capital.toLowerCase())) ||
+      { lat: 0, lon: 0 };
+    if (!coords.lat && !coords.lon) continue;
+    cities.set(id, {
+      id,
+      name,
+      lat: coords.lat,
+      lon: coords.lon,
+      cc,
+      pop: Math.max(pop, 1_000_000), // keep countries visible vs tiny towns
+      names: new Set([name]),
+    });
+    countriesAdded++;
+  }
+  console.log(`  ${countriesAdded} countries added`);
+
+  console.log('[4/5] Streaming alternateNamesV2 (multilingual names: en/he/ar/ru/zh/de)');
   let kept = 0;
   let scanned = 0;
   await eachZipLine(altZip, (line) => {
@@ -151,7 +206,7 @@ async function main() {
   process.stdout.write('\n');
   console.log(`  ${kept} alternate names kept`);
 
-  console.log('[4/4] Writing gazetteer JSON');
+  console.log('[5/5] Writing gazetteer JSON');
   const entries = [...cities.values()].map((e) => ({
     id: e.id,
     name: e.name,
@@ -164,7 +219,7 @@ async function main() {
   entries.sort((a, b) => b.pop - a.pop);
   const out = {
     version: 1,
-    source: 'GeoNames cities15000 + alternateNamesV2',
+    source: 'GeoNames cities15000 + countryInfo + alternateNamesV2',
     builtAt: new Date().toISOString(),
     entries,
   };

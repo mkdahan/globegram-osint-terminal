@@ -147,15 +147,27 @@ Every incoming message runs through two parallel local engines (no cloud calls):
    e.g. *"explosion near the facility of **Intel** in **Kiryat Gat**"* pins both the
    city and the company.
 
-### Bigger databases (optional, built locally)
+### Databases (countries, cities, companies & stocks)
+
+The repo ships **bundled world databases** so recognition works out of the box:
+
+| DB | Size | Coverage |
+|---|---|---|
+| `main/geocoder/bundled-gazetteer.json` | ~4 MB | **~34,000** places — all countries + cities with pop ≥ 15k, multilingual names (en/he/ar/ru/zh/de) |
+| `main/corporate/bundled-companies.json` | ~2 MB | **~8,700** public companies with HQ coordinates, tickers & aliases |
+
+At runtime the app also merges a curated OSINT seed (EMCO, Elbit, Baykar, Tryavna, …).
+
+To rebuild fresher copies from GeoNames + Wikidata (writes to `%LOCALAPPDATA%`, then
+re-bundles into the repo):
 
 ```bash
-npm run build-gazetteer   # GeoNames: ~30,000 cities (pop ≥ 15k), 6 languages (~200 MB download, one-time)
-npm run build-companies   # Wikidata SPARQL: all publicly listed companies with HQ coordinates
+npm run build-all
+# equivalent to:
+#   npm run build-gazetteer
+#   npm run build-companies
+#   npm run bundle-databases
 ```
-
-Both write to `%LOCALAPPDATA%` (outside the repo). Without them the app uses the
-bundled seeds: ~130 cities and ~70 companies, Middle-East-focused.
 
 ---
 
