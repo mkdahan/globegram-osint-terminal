@@ -1,17 +1,12 @@
 /**
  * Multilingual exact-location engine over a GeoNames gazetteer.
  *
- * Loads %LOCALAPPDATA%\globegram-terminal\gazetteer.json when it has been
- * built (npm run build-gazetteer), otherwise falls back to the bundled
- * seed-gazetteer.json (major world + Middle East cities).
- *
  * Matching strategy (regex \b word boundaries do not work for Hebrew/Arabic/CJK):
  *  - tokenize text with a Unicode-aware regex, check 1..4-gram phrases
- *    against a normalized name index
- *  - strip common Hebrew (ב,ל,מ,ו,ה,כ,ש) and Arabic (و,ب,ل,ف,ك) proclitic
- *    prefixes so "בירושלים" still matches "ירושלים"
- *  - CJK names (no word separators) are matched by substring scan
- *  - homonyms resolve to the highest-population entry
+ *  - strip Hebrew/Arabic proclitic prefixes so "בבולגריה" → Bulgaria
+ *  - score locative context ("ב"/"in"/"at"/"near") so the event place ranks
+ *    above secondary mentions ("לאוקראינה" = to Ukraine)
+ *  - CJK substring scan; Cyrillic case endings
  */
 'use strict';
 
@@ -21,17 +16,62 @@ const { GAZETTEER_PATH, BUNDLED_GAZETTEER_PATH, SEED_GAZETTEER_PATH } = require(
 const HEBREW_PREFIXES = ['ו', 'ב', 'ל', 'מ', 'כ', 'ש', 'ה'];
 const ARABIC_PREFIXES = ['و', 'ب', 'ل', 'ف', 'ك'];
 const CJK_RE = /[\u3400-\u9FFF\uF900-\uFAFF]/;
+const HE_AR_RE = /[\u0590-\u05FF\u0600-\u06FF]/;
 const TOKEN_RE = /[\p{L}\p{M}\p{N}'’]+/gu;
 const MAX_NGRAM = 4;
 const MAX_MATCHES_PER_MESSAGE = 5;
 
+/** English prepositions before a place name */
+const EN_STRONG = new Set([
+  'in', 'at', 'near', 'over', 'around', 'inside', 'within', 'across',
+  'into', 'onto', 'above', 'below', 'outside', 'beside',
+]);
+const EN_MID = new Set(['from', 'of', 'by', 'on']);
+const EN_WEAK = new Set(['to', 'for', 'toward', 'towards', 'vs', 'versus', 'via']);
+
+/** Hebrew/Arabic standalone context tokens (already normalized/lowercase) */
+const HE_CTX_STRONG = new Set([
+  'באזור', 'ליד', 'לידי', 'סמוך', 'בקרבת', 'בתוך', 'מעל', 'מתחת', 'בין',
+  'במרכז', 'בדרום', 'בצפון', 'במזרח', 'במערב', 'על־יד', 'על יד',
+]);
+const AR_CTX_STRONG = new Set(['في', 'بـ', 'قرب', 'بجانب', 'داخل', 'على']);
+
+/**
+ * Stems that look like places after prefix-strip but are actually grammar/context
+ * ("באזור" → אזור ≠ Azor; "over" ≠ Over, England).
+ */
+const BLOCK_STEMS = new Set([
+  'אזור', 'מרכז', 'דרום', 'צפון', 'מזרח', 'מערב', 'עיירה', 'עיר', 'כפר',
+  'מפעל', 'מחסן', 'שדה', 'אזורי', 'רחוב', 'שכונה', 'גבעה',
+  'over', 'near', 'area', 'region', 'center', 'centre', 'town', 'city',
+  'village', 'facility', 'plant', 'factory', 'warehouse', 'district',
+  'gat', // fragment of "Kiryat Gat"
+]);
+
+/** Locative strength of an attached proclitic letter */
+const PREFIX_SCORE = {
+  ב: 100, // Hebrew in/at
+  ب: 100, // Arabic in/at
+  מ: 45, // from
+  ل: 15, // Arabic to/for
+  ל: 15, // Hebrew to (often recipient, not event site)
+  ف: 35,
+  ك: 25,
+  כ: 25,
+  ه: 20,
+  ה: 20,
+  ש: 15,
+  و: 5,
+  ו: 5,
+};
+
 function normalize(s) {
   return String(s)
     .toLowerCase()
-    .replace(/[\u064B-\u065F\u0670\u0640]/g, '') // Arabic diacritics + tatweel
-    .replace(/[أإآ]/g, 'ا') // Alef variants
-    .replace(/[\u0591-\u05C7]/g, '') // Hebrew niqqud/cantillation
-    .replace(/[‐‑–—\-]/g, ' ') // hyphen family -> space
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/[\u0591-\u05C7]/g, '')
+    .replace(/[‐‑–—\-]/g, ' ')
     .replace(/[’']/g, "'")
     .replace(/\s+/g, ' ')
     .trim();
@@ -40,14 +80,12 @@ function normalize(s) {
 class GeonamesParser {
   constructor() {
     this.entries = [];
-    this.nameIndex = new Map(); // normalized name -> entry index (highest pop wins)
-    this.cjkNames = []; // [{name, idx}] sorted by name length desc
+    this.nameIndex = new Map();
+    this.cjkNames = [];
     this.source = null;
   }
 
   load() {
-    // Preference: locally rebuilt full DB → repo-bundled world DB → tiny seed
-    // Always merge curated seed on top (Tryavna, Kiryat Gat, Hebrew aliases, …).
     let raw = null;
     if (fs.existsSync(GAZETTEER_PATH)) {
       raw = JSON.parse(fs.readFileSync(GAZETTEER_PATH, 'utf-8'));
@@ -92,7 +130,6 @@ class GeonamesParser {
       if (same) {
         cur.names = [...new Set([...(cur.names || []), ...(e.names || []), e.name])];
       } else {
-        // Seed id collided with a different GeoNames place — keep both
         byId.set(`seed:${e.name}:${e.id}`, { ...e, names: [...(e.names || [])] });
       }
     }
@@ -111,7 +148,6 @@ class GeonamesParser {
           continue;
         }
         const key = normalize(n);
-        // Hebrew place names can be 2 letters (e.g. עכו); Latin needs ≥3
         const isHebrew = /[\u0590-\u05FF]/.test(n);
         if (key.length < (isHebrew ? 2 : 3)) continue;
         const existing = this.nameIndex.get(key);
@@ -123,80 +159,185 @@ class GeonamesParser {
     this.cjkNames.sort((a, b) => b.name.length - a.name.length);
   }
 
-  /** @returns [{lat, lon, name, matchedWord, cc, pop, geonameid}] — first-in-text order */
+  /**
+   * @returns [{lat, lon, name, matchedWord, cc, pop, geonameid, locativeScore, locativeHint}]
+   * Sorted: strongest locative ("ב"/"in"/"at") first, then earlier in text, then population.
+   */
   match(text) {
     if (!text || !this.entries.length) return [];
-    const found = new Map(); // entryIdx -> {matchedWord, order}
+    const found = new Map(); // entryIdx -> best hit
 
-    // --- token/n-gram pass ---
     const norm = normalize(text);
     const tokens = norm.match(TOKEN_RE) || [];
     let order = 0;
+
     for (let i = 0; i < tokens.length; i++) {
       for (let n = MAX_NGRAM; n >= 1; n--) {
         if (i + n > tokens.length) continue;
         const phrase = tokens.slice(i, i + n).join(' ');
-        const idx = this._lookup(phrase, n === 1);
-        if (idx !== undefined && !found.has(idx)) {
-          found.set(idx, { matchedWord: phrase, order: order++ });
+        // Never treat locative/preposition words themselves as place names
+        if (
+          EN_STRONG.has(phrase) || EN_MID.has(phrase) || EN_WEAK.has(phrase) ||
+          HE_CTX_STRONG.has(phrase) || AR_CTX_STRONG.has(phrase)
+        ) continue;
+
+        const hit = this._lookupDetailed(phrase, n === 1);
+        if (!hit) continue;
+        if (hit.stem && BLOCK_STEMS.has(hit.stem)) continue;
+        if (BLOCK_STEMS.has(phrase)) continue;
+
+        // Skip short 1-grams already covered by a longer match ("gat" ⊂ "kiryat gat")
+        if (n === 1 && phrase.length <= 4) {
+          let covered = false;
+          for (const v of found.values()) {
+            if (v.matchedWord !== phrase && v.matchedWord.split(' ').includes(phrase)) {
+              covered = true;
+              break;
+            }
+          }
+          if (covered) continue;
+        }
+
+        const prev = i > 0 ? tokens[i - 1] : '';
+        const loc = this._locativeScore({
+          prefix: hit.prefix,
+          prevToken: prev,
+          matchedWord: phrase,
+        });
+        const prevBest = found.get(hit.idx);
+        if (
+          !prevBest ||
+          loc.score > prevBest.locativeScore ||
+          (loc.score === prevBest.locativeScore && order < prevBest.order)
+        ) {
+          found.set(hit.idx, {
+            matchedWord: phrase,
+            order: prevBest ? prevBest.order : order++,
+            locativeScore: loc.score,
+            locativeHint: loc.hint,
+          });
         }
       }
     }
 
-    // --- CJK substring pass ---
     if (CJK_RE.test(text)) {
       for (const { name, idx } of this.cjkNames) {
         if (!found.has(idx) && text.includes(name)) {
-          found.set(idx, { matchedWord: name, order: order++ });
+          found.set(idx, {
+            matchedWord: name,
+            order: order++,
+            locativeScore: 0,
+            locativeHint: null,
+          });
         }
       }
     }
 
     const results = [...found.entries()]
-      .map(([idx, { matchedWord, order: o }]) => {
+      .map(([idx, meta]) => {
         const e = this.entries[idx];
         return {
           geonameid: e.id,
           name: e.name,
-          matchedWord,
+          matchedWord: meta.matchedWord,
           lat: e.lat,
           lon: e.lon,
           cc: e.cc || null,
           pop: e.pop || 0,
-          _order: o,
+          locativeScore: meta.locativeScore || 0,
+          locativeHint: meta.locativeHint || null,
+          _order: meta.order,
         };
       })
-      // Prefer earlier mentions (story location), then higher population as tie-break
-      .sort((a, b) => a._order - b._order || b.pop - a.pop)
+      .sort(
+        (a, b) =>
+          b.locativeScore - a.locativeScore ||
+          a._order - b._order ||
+          b.pop - a.pop
+      )
       .slice(0, MAX_MATCHES_PER_MESSAGE);
 
     for (const r of results) delete r._order;
     return results;
   }
 
-  _lookup(phrase, allowPrefixStrip) {
-    let idx = this.nameIndex.get(phrase);
-    if (idx !== undefined) return idx;
-    if (!allowPrefixStrip) {
-      // For multi-word phrases, also try stripping a prefix off the first word
-      const stripped = this._stripPrefix(phrase);
-      return stripped ? this.nameIndex.get(stripped) : undefined;
+  /**
+   * Score how strongly this mention looks like "the place where it happened".
+   * ב / in / at / near  → high
+   * ל / to / for        → low (often a recipient, not the scene)
+   */
+  _locativeScore({ prefix, prevToken, matchedWord }) {
+    let score = 0;
+    let hint = null;
+
+    if (prefix && PREFIX_SCORE[prefix] != null) {
+      score = PREFIX_SCORE[prefix];
+      hint = `prefix:${prefix}`;
     }
-    // Single token: try stripping up to two proclitic prefix letters (e.g. "ומירושלים")
+
+    if (prevToken) {
+      if (EN_STRONG.has(prevToken)) {
+        if (score < 100) { score = 100; hint = `en:${prevToken}`; }
+      } else if (EN_MID.has(prevToken)) {
+        if (score < 45) { score = 45; hint = `en:${prevToken}`; }
+      } else if (EN_WEAK.has(prevToken)) {
+        if (score < 15) { score = 15; hint = `en:${prevToken}`; }
+      }
+
+      if (HE_CTX_STRONG.has(prevToken) || AR_CTX_STRONG.has(prevToken)) {
+        if (score < 95) { score = 95; hint = `ctx:${prevToken}`; }
+      } else if (prevToken[0] === 'ב' && prevToken.length >= 2) {
+        // באזור / במרכז / בדרום… — "in the X of PLACE"
+        if (score < 85) { score = 85; hint = `he-ctx:${prevToken}`; }
+      } else if (prevToken === 'в' || prevToken === 'на' || prevToken === 'около') {
+        if (score < 100) { score = 100; hint = `ru:${prevToken}`; }
+      } else if (prevToken === 'к' || prevToken === 'для') {
+        if (score < 15) { score = 15; hint = `ru:${prevToken}`; }
+      }
+    }
+
+    // Bare name with no locative cue
+    if (!score && matchedWord) {
+      score = 0;
+      hint = null;
+    }
+    return { score, hint };
+  }
+
+  /** @returns {{idx, prefix, stem}|null} */
+  _lookupDetailed(phrase, allowMorph) {
+    let idx = this.nameIndex.get(phrase);
+    if (idx !== undefined) return { idx, prefix: null, stem: phrase };
+
+    if (!allowMorph) {
+      const stripped = this._stripPrefix(phrase);
+      if (stripped) {
+        idx = this.nameIndex.get(stripped.rest);
+        if (idx !== undefined) return { idx, prefix: stripped.prefix, stem: stripped.rest };
+      }
+      return null;
+    }
+
+    // Single token: strip up to two proclitic letters (ומבולגריה → בולגריה)
     let candidate = phrase;
+    let bestPrefix = null;
     for (let depth = 0; depth < 2; depth++) {
       const stripped = this._stripPrefix(candidate);
       if (!stripped) break;
-      idx = this.nameIndex.get(stripped);
-      if (idx !== undefined) return idx;
-      candidate = stripped;
+      if (!bestPrefix) bestPrefix = stripped.prefix;
+      if (PREFIX_SCORE[stripped.prefix] > (PREFIX_SCORE[bestPrefix] || 0)) {
+        bestPrefix = stripped.prefix;
+      }
+      idx = this.nameIndex.get(stripped.rest);
+      if (idx !== undefined) return { idx, prefix: bestPrefix, stem: stripped.rest };
+      candidate = stripped.rest;
     }
-    // Cyrillic: undo common grammatical case endings ("в Москве" -> "москва")
+
     if (/[\u0400-\u04FF]/.test(phrase)) {
       const found = this._cyrillicCaseLookup(phrase);
-      if (found !== undefined) return found;
+      if (found !== undefined) return { idx: found, prefix: null, stem: phrase };
     }
-    return undefined;
+    return null;
   }
 
   _cyrillicCaseLookup(token) {
@@ -212,11 +353,16 @@ class GeonamesParser {
     return undefined;
   }
 
+  /** @returns {{prefix, rest}|null} */
   _stripPrefix(phrase) {
+    if (!phrase) return null;
     const first = phrase[0];
     if (!HEBREW_PREFIXES.includes(first) && !ARABIC_PREFIXES.includes(first)) return null;
     const rest = phrase.slice(1);
-    return rest.length >= 3 ? rest : null;
+    // Hebrew/Arabic stems can be 2 letters; Latin after a prefix is rare — keep ≥3
+    const minRest = HE_AR_RE.test(rest) ? 2 : 3;
+    if (rest.length < minRest) return null;
+    return { prefix: first, rest };
   }
 }
 

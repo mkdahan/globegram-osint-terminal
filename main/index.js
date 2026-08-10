@@ -41,8 +41,8 @@ chats.onEvent = async (payload) => {
   const locations = watch.places !== false ? geocoder.match(payload.text) : [];
   const companies = watch.companies !== false ? companyParser.match(payload.text) : [];
 
-  // Unified geo-event targets, ordered by first appearance in the message
-  // (so "EMCO בבולגריה" flies to EMCO/Bulgaria, not a later "Ukraine" mention).
+  // Unified targets: prefer places with locative cues (ב / in / at / near)
+  // over secondary mentions (לאוקראינה = "to Ukraine"), then by text order.
   const lowerText = (payload.text || '').toLowerCase();
   const targets = [
     ...locations.map((l) => ({
@@ -52,6 +52,8 @@ chats.onEvent = async (payload) => {
       lon: l.lon,
       cc: l.cc,
       matchedWord: l.matchedWord,
+      locativeScore: l.locativeScore || 0,
+      locativeHint: l.locativeHint || null,
       _pos: lowerText.indexOf(String(l.matchedWord || '').toLowerCase()),
     })),
     ...companies.map((c) => ({
@@ -65,11 +67,14 @@ chats.onEvent = async (payload) => {
       yahoo: c.yahoo,
       exchange: c.exchange,
       matchedWord: c.matchedWord,
+      // Mild boost when phrased as "facility of X" / "מפעל X" — still below ב/in/at
+      locativeScore: 30,
+      locativeHint: 'company',
       _pos: lowerText.indexOf(String(c.matchedWord || '').toLowerCase()),
     })),
   ]
     .map((t, i) => ({ ...t, _pos: t._pos < 0 ? 1e9 + i : t._pos }))
-    .sort((a, b) => a._pos - b._pos)
+    .sort((a, b) => b.locativeScore - a.locativeScore || a._pos - b._pos)
     .map(({ _pos, ...t }) => t);
 
   const event = {
