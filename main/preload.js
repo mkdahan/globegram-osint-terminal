@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('api', {
     onMediaReady: (cb) => on('tg:media', cb),
     requestMedia: (chatId, msgId, key) =>
       ipcRenderer.invoke('tg:downloadMedia', { chatId, msgId, key }),
+    stats: () => ipcRenderer.invoke('tg:stats'),
   },
   market: {
     candles: (symbol, dateMs, interval) =>

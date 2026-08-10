@@ -479,6 +479,37 @@ async function boot() {
   refreshMovers();
   setInterval(refreshMovers, (settings.moversRefreshSec || 60) * 1000);
   setInterval(() => charts.refreshLive(), (settings.liveCandleRefreshSec || 15) * 1000);
+  setInterval(refreshIngestStatus, 5000);
+  refreshIngestStatus();
+}
+
+async function refreshIngestStatus() {
+  const el = $('live-ingest');
+  if (!el || !window.api.events.stats) return;
+  try {
+    const s = await window.api.events.stats();
+    const n = (s.monitored || []).length;
+    if (!n) {
+      el.textContent = 'no channels';
+      el.className = 'live-pill warn';
+      return;
+    }
+    const mode = s.listening ? (s.polling ? 'live+poll' : 'live') : 'offline';
+    if (s.emitted > 0) {
+      const ago = s.lastAt ? Math.round((Date.now() - s.lastAt) / 1000) : '?';
+      el.textContent = `${mode} · ${s.emitted} msgs · ${ago}s`;
+      el.className = 'live-pill ok';
+      el.title = s.lastChat ? `${s.lastChat}: ${s.lastText || ''}` : '';
+    } else {
+      el.textContent = `${mode} · ${n} ch · waiting…`;
+      el.className = 'live-pill warn';
+      el.title = s.skippedUnmonitored
+        ? `skipped ${s.skippedUnmonitored} msgs from other chats`
+        : '';
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 boot();

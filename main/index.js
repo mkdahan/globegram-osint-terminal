@@ -134,11 +134,14 @@ function registerIpc() {
   ipcMain.handle('chats:list', async () => {
     const list = await chats.listDialogs();
     chats.startListening();
+    // Entity cache is warm now — catch anything missed while connecting
+    chats.pollMonitored().catch(() => {});
     return list;
   });
   ipcMain.handle('chats:setMonitored', (e, ids) => {
     chats.setMonitored(ids);
     settings.save({ monitoredChats: ids });
+    chats.startListening(); // ensure live handler + poll backup are running
     return true;
   });
   ipcMain.handle('tg:downloadMedia', async (e, { chatId, msgId, key }) => {
@@ -183,6 +186,12 @@ function registerIpc() {
     locations: geocoder.entries.length,
     companySource: companyParser.source,
     companies: companyParser.companies.length,
+  }));
+  ipcMain.handle('tg:stats', () => ({
+    ...chats.stats,
+    monitored: chats._monitoredPrimary || [],
+    listening: !!chats._handlerAttached,
+    polling: !!chats._pollTimer,
   }));
   ipcMain.handle('app:openMediaDir', () => shell.openPath(MEDIA_DIR));
 }

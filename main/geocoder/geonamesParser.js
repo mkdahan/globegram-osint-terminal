@@ -33,6 +33,7 @@ const EN_WEAK = new Set(['to', 'for', 'toward', 'towards', 'vs', 'versus', 'via'
 const HE_CTX_STRONG = new Set([
   'באזור', 'ליד', 'לידי', 'סמוך', 'בקרבת', 'בתוך', 'מעל', 'מתחת', 'בין',
   'במרכז', 'בדרום', 'בצפון', 'במזרח', 'במערב', 'על־יד', 'על יד',
+  'על', // "על זאפורוזיה" = attacks on Zaporizhzhia
 ]);
 const AR_CTX_STRONG = new Set(['في', 'بـ', 'قرب', 'بجانب', 'داخل', 'على']);
 
@@ -199,8 +200,13 @@ class GeonamesParser {
         }
 
         const prev = i > 0 ? tokens[i - 1] : '';
+        // Alias may be stored WITH the proclitic (בחמוט) — still count as ב-locative
+        let prefix = hit.prefix;
+        if (!prefix && phrase.length > 2 && (HEBREW_PREFIXES.includes(phrase[0]) || ARABIC_PREFIXES.includes(phrase[0]))) {
+          prefix = phrase[0];
+        }
         const loc = this._locativeScore({
-          prefix: hit.prefix,
+          prefix,
           prevToken: prev,
           matchedWord: phrase,
         });
