@@ -153,7 +153,7 @@ The repo ships **bundled world databases** so recognition works out of the box:
 
 | DB | Size | Coverage |
 |---|---|---|
-| `main/geocoder/bundled-gazetteer.json` | ~4 MB | **~34,000** places — all countries + cities with pop ≥ 15k, multilingual names (en/he/ar/ru/zh/de) |
+| `main/geocoder/bundled-gazetteer.json` | ~24 MB | **~175,000** places — **all countries**, **all cities** (pop ≥ 1,000), **all admin1 regions** (states/provinces), Hebrew + English (+ ar/ru/zh/de) |
 | `main/corporate/bundled-companies.json` | ~2 MB | **~8,700** public companies with HQ coordinates, tickers & aliases |
 
 At runtime the app also merges a curated OSINT seed (EMCO, Elbit, Baykar, Tryavna, …).

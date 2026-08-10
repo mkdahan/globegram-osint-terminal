@@ -23,10 +23,15 @@ const {
 const OUT_GAZ = path.join(ROOT, 'main', 'geocoder', 'bundled-gazetteer.json');
 const OUT_CO = path.join(ROOT, 'main', 'corporate', 'bundled-companies.json');
 
-// Keep repo size sane while still covering the world
-const MAX_GAZETTEER_ENTRIES = 35000; // cities15000 is ~25k + countries
+// Worldwide cities1000 + countries + admin1 regions ≈ 150–200k entries.
+// GitHub hard limit is 100 MB/file — keep aliases lean (he/en first).
+const MAX_GAZETTEER_ENTRIES = 250000;
+const MAX_NAMES_PER_PLACE = 16;
 const MAX_COMPANY_ENTRIES = 12000;
 const MAX_ALIASES_PER_COMPANY = 12;
+
+const HE_RE = /[\u0590-\u05FF]/
+const LAT_RE = /^[\x00-\x7F]+$/; // prefer ASCII/English among non-Hebrew
 
 function loadJson(p) {
   if (!fs.existsSync(p)) return null;
@@ -40,6 +45,16 @@ function bundleGazetteer() {
     console.warn(`[skip] no full gazetteer at ${GAZETTEER_PATH} — run npm run build-gazetteer first`);
     return false;
   }
+  const pickNames = (names) => {
+    const list = [...new Set(names || [])];
+    // Prefer Hebrew + English/ASCII, then others
+    list.sort((a, b) => {
+      const score = (n) => (HE_RE.test(n) ? 2 : 0) + (LAT_RE.test(n) ? 1 : 0);
+      return score(b) - score(a);
+    });
+    return list.slice(0, MAX_NAMES_PER_PLACE);
+  };
+
   const byId = new Map();
   for (const e of raw.entries.slice(0, MAX_GAZETTEER_ENTRIES)) {
     byId.set(e.id, {
@@ -49,7 +64,8 @@ function bundleGazetteer() {
       lon: e.lon,
       cc: e.cc,
       pop: e.pop,
-      names: (e.names || []).slice(0, 20),
+      kind: e.kind || 'city',
+      names: pickNames(e.names),
     });
   }
   // Merge curated seed entries (Tryavna, Kiryat Gat, Hebrew country aliases, …)
@@ -69,10 +85,22 @@ function bundleGazetteer() {
     builtAt: new Date().toISOString(),
     entries,
   };
-  fs.writeFileSync(OUT_GAZ, JSON.stringify(out));
+  writeAtomic(OUT_GAZ, JSON.stringify(out));
   const mb = (fs.statSync(OUT_GAZ).size / 1e6).toFixed(1);
   console.log(`[gazetteer] ${entries.length} locations -> ${OUT_GAZ} (${mb} MB)`);
   return true;
+}
+
+/** Write via temp+rename (avoids OneDrive locks on in-place overwrite). */
+function writeAtomic(dest, data) {
+  const tmp = dest + '.tmp';
+  fs.writeFileSync(tmp, data);
+  try {
+    if (fs.existsSync(dest)) fs.unlinkSync(dest);
+  } catch {
+    /* locked — try replace anyway */
+  }
+  fs.renameSync(tmp, dest);
 }
 
 function bundleCompanies() {
@@ -129,7 +157,7 @@ function bundleCompanies() {
     builtAt: new Date().toISOString(),
     companies,
   };
-  fs.writeFileSync(OUT_CO, JSON.stringify(out));
+  writeAtomic(OUT_CO, JSON.stringify(out));
   const mb = (fs.statSync(OUT_CO).size / 1e6).toFixed(1);
   console.log(`[companies] ${companies.length} companies -> ${OUT_CO} (${mb} MB)`);
   return true;

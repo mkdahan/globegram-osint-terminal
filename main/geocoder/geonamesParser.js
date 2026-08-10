@@ -111,7 +111,9 @@ class GeonamesParser {
           continue;
         }
         const key = normalize(n);
-        if (key.length < 3) continue;
+        // Hebrew place names can be 2 letters (e.g. עכו); Latin needs ≥3
+        const isHebrew = /[\u0590-\u05FF]/.test(n);
+        if (key.length < (isHebrew ? 2 : 3)) continue;
         const existing = this.nameIndex.get(key);
         if (existing === undefined || (this.entries[existing].pop || 0) < (entry.pop || 0)) {
           this.nameIndex.set(key, idx);
