@@ -1,0 +1,28 @@
+{
+  "name": "globegram-terminal",
+  "version": "0.1.0",
+  "description": "Real-Time Geo-Financial Intelligence Terminal — Telegram OSINT + 3D globe + synchronized market charts",
+  "main": "main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "build-gazetteer": "node scripts/downloadGeonames.js",
+    "build-companies": "node scripts/downloadCompanies.js"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^43.3.0"
+  },
+  "dependencies": {
+    "cesium": "^1.119.0",
+    "lightweight-charts": "^4.2.0",
+    "telegram": "^2.22.2",
+    "yahoo-finance2": "^4.0.2",
+    "yauzl": "^3.1.3"
+  },
+  "allowScripts": {
+    "bufferutil@4.1.0": true,
+    "utf-8-validate@5.0.10": true,
+    "es5-ext@0.10.64": true,
+    "electron@43.3.0": true
+  }
+}

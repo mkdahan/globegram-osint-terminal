@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Cesium requires eval/wasm-eval; everything else is locked to self + OSM tiles -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' file:; script-src 'self' blob: 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: https://*.basemaps.cartocdn.com https://*.openstreetmap.org; media-src 'self' file: blob:; connect-src 'self' file: data: blob: https://*.basemaps.cartocdn.com https://*.openstreetmap.org; worker-src 'self' blob:; font-src 'self' data:;" />
+  <title>GlobeGram OSINT Terminal</title>
+  <link rel="stylesheet" href="../node_modules/cesium/Build/Cesium/Widgets/widgets.css" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="js/cesium-config.js"></script>
+  <script src="../node_modules/cesium/Build/Cesium/Cesium.js"></script>
+  <script src="../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- ===================== SIDEBAR ===================== -->
+    <aside id="sidebar">
+      <h1 class="brand">GLOBEGRAM <span>OSINT</span></h1>
+
+      <!-- Auth panel -->
+      <section id="auth-panel" class="panel">
+        <h2>Telegram Account
+          <button id="auth-help-btn" class="mini" title="How to connect">?</button>
+        </h2>
+        <div id="auth-status" class="status-line">Checking…</div>
+
+        <div id="auth-help" class="help-box hidden">
+          <b>How to connect (one-time setup):</b>
+          <ol>
+            <li>Open <a href="https://my.telegram.org" target="_blank">my.telegram.org</a>
+              and log in with your phone number.</li>
+            <li>Click <b>API development tools</b>, create an app (any name),
+              and copy the <b>api_id</b> and <b>api_hash</b>.</li>
+            <li>Paste them below and save. They are stored only on this
+              computer (<code>%LOCALAPPDATA%\globegram-terminal</code>) —
+              never inside the project folder or on GitHub.</li>
+            <li>Enter your phone number with country code
+              (e.g. <code>+972501234567</code>) and press <b>Send code</b>.</li>
+            <li>Telegram sends a login code to your <b>Telegram app</b>
+              (not SMS) — type it here and sign in.</li>
+            <li>If your account has two-step verification, you will also be
+              asked for your 2FA password.</li>
+          </ol>
+          Your session is saved, so next launches connect automatically.
+          This is your own personal account — the app only reads channels
+          you already joined.
+        </div>
+
+        <div id="creds-form" class="stack hidden">
+          <p class="hint">
+            One-time setup: get <b>api_id / api_hash</b> from
+            <a href="https://my.telegram.org" target="_blank">my.telegram.org</a>
+            → API development tools. Click <b>?</b> above for a full guide.
+            Stored outside the repo in %LOCALAPPDATA%.
+          </p>
+          <input id="api-id" type="text" placeholder="api_id (numbers)" autocomplete="off" />
+          <input id="api-hash" type="password" placeholder="api_hash" autocomplete="off" />
+          <button id="save-creds">Save credentials</button>
+        </div>
+
+        <div id="phone-form" class="stack hidden">
+          <p class="hint">Phone number with country code — the login code will arrive in your Telegram app.</p>
+          <input id="phone" type="tel" placeholder="+972501234567" />
+          <button id="send-code">Send code</button>
+        </div>
+
+        <div id="code-form" class="stack hidden">
+          <p class="hint">Check Telegram (Saved Messages / service chat) for the code.</p>
+          <input id="code" type="text" placeholder="Login code" />
+          <button id="submit-code">Sign in</button>
+        </div>
+
+        <div id="password-form" class="stack hidden">
+          <p class="hint">Your account has two-step verification — enter its password.</p>
+          <input id="password" type="password" placeholder="2FA password" />
+          <button id="submit-password">Verify</button>
+        </div>
+
+        <button id="logout" class="ghost hidden">Log out</button>
+      </section>
+
+      <!-- Profiles -->
+      <section id="profiles-panel" class="panel">
+        <h2>Profiles</h2>
+        <div class="row">
+          <select id="profile-select">
+            <option value="">— select profile —</option>
+          </select>
+          <button id="profile-delete" class="mini ghost" title="Delete selected profile">🗑</button>
+        </div>
+        <div class="row">
+          <input id="profile-name" type="text" placeholder="New profile name…" />
+          <button id="profile-save" class="mini" title="Save current setup as profile">💾</button>
+        </div>
+      </section>
+
+      <!-- Watch filters & alarms -->
+      <section id="watch-panel" class="panel">
+        <h2>Looking For</h2>
+        <label class="toggle-row"><input type="checkbox" id="watch-places" checked /> 📍 Places (GeoNames)</label>
+        <label class="toggle-row"><input type="checkbox" id="watch-companies" checked /> 🏢 Companies &amp; stocks</label>
+        <label class="toggle-row alarm"><input type="checkbox" id="opt-alarms" /> 🚨 Alarm on every match</label>
+        <label class="toggle-row"><input type="checkbox" id="opt-autochart" /> 📈 Auto-load matched company chart</label>
+      </section>
+
+      <!-- Channel selector -->
+      <section id="channels-panel" class="panel">
+        <h2>Monitored Channels <button id="refresh-chats" class="mini" title="Reload chats">⟳</button></h2>
+        <input id="chat-search" type="search" placeholder="Filter…" />
+        <div id="chat-list" class="scroll"></div>
+      </section>
+
+      <!-- Event feed -->
+      <section id="feed-panel" class="panel grow">
+        <h2>Event Feed</h2>
+        <div id="event-feed" class="scroll"></div>
+      </section>
+
+      <div id="geocoder-status" class="status-line dim"></div>
+    </aside>
+
+    <!-- ===================== MAIN AREA ===================== -->
+    <main id="main">
+      <div id="globe-wrap">
+        <div id="cesiumContainer"></div>
+        <div id="media-popup" class="hidden">
+          <div id="media-popup-head">
+            <span id="media-popup-title"></span>
+            <button id="media-popup-close">×</button>
+          </div>
+          <div id="media-popup-corp"></div>
+          <div id="media-popup-body"></div>
+          <div id="media-popup-text"></div>
+        </div>
+        <div id="mode-badge" class="live">● LIVE</div>
+        <button id="go-live" class="hidden">GO LIVE</button>
+        <div id="queue-badge" class="hidden"></div>
+      </div>
+
+      <!-- Charts column -->
+      <div id="charts-col">
+        <div id="charts-toolbar">
+          <input id="ticker-input" type="text" placeholder="Add ticker (e.g. GLD, BTC-USD, ILS=X)" />
+          <button id="add-ticker">+</button>
+        </div>
+        <div id="charts-grid"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== MOVERS TAPE ===================== -->
+  <footer id="tape">
+    <span class="tape-label">TOP MOVERS</span>
+    <div id="tape-track-wrap"><div id="tape-track"></div></div>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
