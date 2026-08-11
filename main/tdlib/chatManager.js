@@ -11,9 +11,13 @@ const { NewMessage } = require('telegram/events');
 const { MEDIA_DIR, SYNC_STATE_PATH, ensureDataDirs } = require('../paths');
 
 const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
-// kikar_haishuk-style incremental sync: every few seconds fetch everything
-// after the persisted last msg id (server-side minId filter — nothing slips).
-const POLL_MS = 5_000;
+// kikar_haishuk-style incremental sync: fetch everything after the persisted
+// last msg id (server-side minId filter — nothing slips). Chats are synced in
+// small round-robin batches: hammering messages.GetHistory for 20+ chats every
+// few seconds triggers Telegram FLOOD_WAIT, which stalls the whole connection.
+// Live NewMessage updates stay instant; the sync loop is the safety net.
+const POLL_MS = 8_000;
+const CHATS_PER_ROUND = 4;
 const FIRST_RUN_BACKLOG = 10; // messages to show for a chat we never synced
 
 /** Canonical string form (no BigInt "n" suffix, trimmed). */
@@ -59,6 +63,7 @@ class ChatManager {
     this._lastMsgId = new Map(); // primary chat id -> highest synced msg id (persisted)
     this._pollTimer = null;
     this._polling = false;
+    this._pollCursor = 0;
     this.stats = { received: 0, emitted: 0, skippedUnmonitored: 0, lastText: '', lastChat: '', lastAt: 0, lastPollAt: 0 };
     this._loadSyncState();
   }
@@ -95,7 +100,11 @@ class ChatManager {
   }
 
   isMonitored(id) {
-    return chatIdAliases(id).some((a) => this.monitored.has(a));
+    // chatIdAliases returns a Set — no .some() there
+    for (const a of chatIdAliases(id)) {
+      if (this.monitored.has(a)) return true;
+    }
+    return false;
   }
 
   /** List all dialogs the account participates in. */
@@ -183,7 +192,15 @@ class ChatManager {
     this._polling = true;
     let dirty = false;
     try {
-      for (const chatId of this._monitoredPrimary) {
+      // Round-robin batch: CHATS_PER_ROUND chats per round, wrapping around.
+      const all = this._monitoredPrimary;
+      const batch = [];
+      for (let i = 0; i < Math.min(CHATS_PER_ROUND, all.length); i++) {
+        batch.push(all[(this._pollCursor + i) % all.length]);
+      }
+      this._pollCursor = (this._pollCursor + batch.length) % Math.max(all.length, 1);
+
+      for (const chatId of batch) {
         try {
           const minId = this._lastMsgId.get(chatId) || 0;
           // Server-side filter: everything strictly after our watermark.
@@ -205,7 +222,13 @@ class ChatManager {
             dirty = true;
           }
         } catch (err) {
-          console.warn(`[chatManager] sync ${chatId}:`, err.message);
+          // Log first error per chat, then throttle — a broken chat otherwise
+          // floods the log every round.
+          const n = (this._syncErrCount = this._syncErrCount || new Map()).get(chatId) || 0;
+          this._syncErrCount.set(chatId, n + 1);
+          if (n === 0 || (n + 1) % 20 === 0) {
+            console.warn(`[chatManager] sync ${chatId} (error #${n + 1}):`, err.message);
+          }
         }
       }
     } finally {
