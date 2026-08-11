@@ -24,15 +24,21 @@ if not errorlevel 1 (
     )
 )
 
-if not exist "node_modules\electron\dist\electron.exe" (
-    echo [setup] Installing dependencies - one time only...
-    call npm install
-    if errorlevel 1 (
-        echo [ERROR] npm install failed.
-        pause
-        exit /b 1
-    )
+if not exist "node_modules\electron\dist\electron.exe" goto :npm_install
+if not exist "node_modules\axios\" goto :npm_install
+if not exist "node_modules\socks-proxy-agent\" goto :npm_install
+goto :after_npm
+
+:npm_install
+echo [setup] Installing / updating dependencies...
+call npm install
+if errorlevel 1 (
+    echo [ERROR] npm install failed.
+    pause
+    exit /b 1
 )
+
+:after_npm
 
 if /i "%~1"=="demo" (
     set GG_DEMO=1

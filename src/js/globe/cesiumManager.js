@@ -128,35 +128,41 @@ export class CesiumManager {
       new Cesium.TimeInterval({ start, stop }),
     ]);
 
+    const isDarknet = event.stream === 'darknet' || String(event.source || '').startsWith('DARKNET');
     const entities = [];
     (event.targets || []).forEach((target, i) => {
       const isCompany = target.kind === 'company';
-      const color = isCompany
-        ? Cesium.Color.GOLD
-        : event.highPriority ? Cesium.Color.RED : Cesium.Color.CYAN;
-      const labelText = isCompany
-        ? `${target.name}${target.ticker ? ` [${target.ticker}]` : ''}`
-        : target.name;
+      let color;
+      if (isDarknet) color = Cesium.Color.fromCssColorString('#ff2d55');
+      else if (isCompany) color = Cesium.Color.GOLD;
+      else color = event.highPriority ? Cesium.Color.RED : Cesium.Color.CYAN;
+
+      const labelText = isDarknet
+        ? `🔒 ${isCompany ? `${target.name}${target.ticker ? ` [${target.ticker}]` : ''}` : target.name}`
+        : isCompany
+          ? `${target.name}${target.ticker ? ` [${target.ticker}]` : ''}`
+          : target.name;
+
       const entity = this.viewer.entities.add({
         id: `${event.key}:t${i}`,
         availability,
         position: Cesium.Cartesian3.fromDegrees(target.lon, target.lat),
         point: {
-          pixelSize: event.highPriority ? 13 : 9,
-          color: color.withAlpha(0.9),
-          outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
-          outlineWidth: 2,
+          pixelSize: isDarknet ? 16 : (event.highPriority ? 13 : 9),
+          color: color.withAlpha(0.95),
+          outlineColor: isDarknet ? Cesium.Color.WHITE : Cesium.Color.WHITE.withAlpha(0.8),
+          outlineWidth: isDarknet ? 3 : 2,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
           text: labelText,
-          font: isCompany ? 'bold 12px "Segoe UI", sans-serif' : '13px "Segoe UI", sans-serif',
-          fillColor: isCompany ? Cesium.Color.GOLD : Cesium.Color.WHITE,
+          font: isDarknet || isCompany ? 'bold 12px "Segoe UI", sans-serif' : '13px "Segoe UI", sans-serif',
+          fillColor: isDarknet ? Cesium.Color.fromCssColorString('#ff8fa3') : (isCompany ? Cesium.Color.GOLD : Cesium.Color.WHITE),
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          pixelOffset: new Cesium.Cartesian2(0, -18),
+          pixelOffset: new Cesium.Cartesian2(0, -20),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       });
@@ -190,8 +196,16 @@ export class CesiumManager {
     const p = this._popup;
     p.dismissed = false;
     p.key = event.key;
-    p.title.textContent = `${target.name} — ${event.chatTitle}`;
-    p.text.textContent = event.text ? event.text.slice(0, 400) : '';
+    const isDarknet = event.stream === 'darknet' || String(event.source || '').startsWith('DARKNET');
+    p.el.classList.toggle('darknet-popup', isDarknet);
+    const latest = p.el.querySelector('.latest-label');
+    if (latest) latest.textContent = isDarknet ? 'DARKNET THREAT' : 'LATEST MATCH';
+    p.title.textContent = isDarknet
+      ? `${event.victim || target.name} — ${event.groupName || event.chatTitle}`
+      : `${target.name} — ${event.chatTitle}`;
+    let bodyText = event.text ? event.text.slice(0, 400) : '';
+    if (isDarknet && event.leakUrl) bodyText += `\n${event.leakUrl}`;
+    p.text.textContent = bodyText;
     this._renderCorporateBadge(event, target);
     this._renderPopupMedia(event);
     p.el.classList.remove('hidden');

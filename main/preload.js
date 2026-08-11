@@ -44,6 +44,10 @@ contextBridge.exposeInMainWorld('api', {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (partial) => ipcRenderer.invoke('settings:set', partial),
   },
+  darknet: {
+    stats: () => ipcRenderer.invoke('darknet:stats'),
+    pollNow: () => ipcRenderer.invoke('darknet:pollNow'),
+  },
   geocoderInfo: () => ipcRenderer.invoke('geocoder:info'),
   openMediaDir: () => ipcRenderer.invoke('app:openMediaDir'),
   openLog: () => ipcRenderer.invoke('app:openLog'),

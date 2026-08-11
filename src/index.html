@@ -95,13 +95,46 @@
         </div>
       </section>
 
+      <!-- Data sources -->
+      <section id="sources-panel" class="panel">
+        <h2>Data Sources</h2>
+        <label class="toggle-row"><input type="checkbox" id="src-telegram" checked /> Telegram channels</label>
+        <label class="toggle-row"><input type="checkbox" id="src-darknet" /> Darknet CTI (ransomware / leaks)</label>
+        <div id="darknet-opts" class="stack dim-box">
+          <label class="toggle-row"><input type="checkbox" id="dn-tor" /> Route onion feeds via Tor</label>
+          <div class="row">
+            <label class="mini-label">Poll</label>
+            <select id="dn-poll">
+              <option value="3">every 3 min</option>
+              <option value="5" selected>every 5 min</option>
+              <option value="10">every 10 min</option>
+              <option value="15">every 15 min</option>
+            </select>
+          </div>
+          <div class="row">
+            <label class="mini-label">Min</label>
+            <select id="dn-severity">
+              <option value="LOW">LOW+</option>
+              <option value="MEDIUM" selected>MEDIUM+</option>
+              <option value="HIGH">HIGH+</option>
+              <option value="CRITICAL_CYBER">CRITICAL only</option>
+            </select>
+          </div>
+          <div class="row">
+            <button id="dn-poll-now" class="mini">Poll now</button>
+            <span id="dn-status" class="status-line dim">off</span>
+          </div>
+          <p class="hint">Clearnet ransomware RSS works without Tor. Enable Tor only if a local SOCKS proxy is running (default <code>127.0.0.1:9050</code>).</p>
+        </div>
+      </section>
+
       <!-- Watch filters & alarms -->
       <section id="watch-panel" class="panel">
         <h2>Looking For</h2>
-        <label class="toggle-row"><input type="checkbox" id="watch-places" checked /> 📍 Places (GeoNames)</label>
-        <label class="toggle-row"><input type="checkbox" id="watch-companies" checked /> 🏢 Companies &amp; stocks</label>
-        <label class="toggle-row alarm"><input type="checkbox" id="opt-alarms" /> 🚨 Alarm on every match</label>
-        <label class="toggle-row"><input type="checkbox" id="opt-autochart" /> 📈 Auto-load matched company chart</label>
+        <label class="toggle-row"><input type="checkbox" id="watch-places" checked /> Places (GeoNames)</label>
+        <label class="toggle-row"><input type="checkbox" id="watch-companies" checked /> Companies &amp; stocks</label>
+        <label class="toggle-row alarm"><input type="checkbox" id="opt-alarms" /> Alarm on every match</label>
+        <label class="toggle-row"><input type="checkbox" id="opt-autochart" /> Auto-load matched company chart</label>
       </section>
 
       <!-- Channel selector -->
@@ -150,8 +183,11 @@
     </main>
   </div>
 
-  <!-- ===================== MOVERS TAPE ===================== -->
-  <footer id="tape">
+  <!-- ===================== DOCK + MOVERS TAPE ===================== -->
+  <footer id="dock">
+    <button id="toggle-sidebar" class="dock-btn active" title="Show / hide configuration menu">☰ Menu</button>
+    <button id="toggle-charts" class="dock-btn active" title="Show / hide market charts">📈 Charts</button>
+    <span class="dock-sep"></span>
     <span class="tape-label">TOP MOVERS</span>
     <div id="tape-track-wrap"><div id="tape-track"></div></div>
   </footer>

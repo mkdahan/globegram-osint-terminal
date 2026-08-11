@@ -18,6 +18,7 @@ const { CompanyParser } = require('./corporate/companyParser');
 const keywordFilter = require('./utils/keywordFilter');
 const marketData = require('./financial/marketData');
 const topMovers = require('./financial/topMovers');
+const { DarknetScraper } = require('./darknet/darknetScraper');
 const { ensureDataDirs, MEDIA_DIR } = require('./paths');
 
 let win = null;
@@ -37,21 +38,40 @@ function send(channel, payload) {
 const recentEvents = [];
 const MAX_RECENT_EVENTS = 300;
 
-/* ---------------- Telegram event pipeline ---------------- */
+/* ---------------- shared geo-event pipeline ---------------- */
 
 tg.onAuthStateChange = (state) => send('auth:state', state);
 
-chats.onEvent = async (payload) => {
-  const { highPriority, matches } = keywordFilter.classify(payload.text);
+/**
+ * Telegram + Darknet CTI both land here. Applies watch filters, geocodes
+ * places/companies, buffers for startup replay, and pushes to the UI.
+ */
+async function processEvent(payload) {
+  const isDarknet = String(payload.source || '').startsWith('DARKNET')
+    || payload.chatId === 'darknet';
 
-  // Parallel parsing engines, filtered by the user's watch flags
+  // Source gate — profiles / Data Sources toggles apply immediately
+  const sources = (currentSettings && currentSettings.sources) || { telegram: true, darknet: false };
+  if (isDarknet && sources.darknet === false) return;
+  if (!isDarknet && payload.chatId !== 'demo' && sources.telegram === false) return;
+
+  const { highPriority: kwHigh, matches } = keywordFilter.classify(payload.text);
+  const highPriority = Boolean(payload.highPriorityHint) || kwHigh || isDarknet;
+
   const watch = (currentSettings && currentSettings.watch) || { places: true, companies: true };
-  const locations = watch.places !== false ? geocoder.match(payload.text) : [];
-  const companies = watch.companies !== false ? companyParser.match(payload.text) : [];
+  // For darknet: also match the extracted victim name as a company query
+  const searchText = isDarknet && payload.victim
+    ? `${payload.text}\n${payload.victim}`
+    : payload.text;
+  const locations = watch.places !== false ? geocoder.match(searchText) : [];
+  let companies = watch.companies !== false ? companyParser.match(searchText) : [];
 
-  // Unified targets: prefer places with locative cues (ב / in / at / near)
-  // over secondary mentions (לאוקראינה = "to Ukraine"), then by text order.
-  const lowerText = (payload.text || '').toLowerCase();
+  // Darknet boost: if victim string is an exact-ish company alias, force-include
+  if (isDarknet && watch.companies !== false && payload.victim && !companies.length) {
+    companies = companyParser.match(String(payload.victim));
+  }
+
+  const lowerText = (searchText || '').toLowerCase();
   const targets = [
     ...locations.map((l) => ({
       kind: 'place',
@@ -75,9 +95,9 @@ chats.onEvent = async (payload) => {
       yahoo: c.yahoo,
       exchange: c.exchange,
       matchedWord: c.matchedWord,
-      // Mild boost when phrased as "facility of X" / "מפעל X" — still below ב/in/at
-      locativeScore: 30,
-      locativeHint: 'company',
+      // Darknet victim HQ ranks above bare place mentions
+      locativeScore: isDarknet ? 120 : 30,
+      locativeHint: isDarknet ? 'darknet-victim' : 'company',
       _pos: lowerText.indexOf(String(c.matchedWord || '').toLowerCase()),
     })),
   ]
@@ -88,11 +108,14 @@ chats.onEvent = async (payload) => {
   const event = {
     ...payload,
     highPriority,
-    keywords: matches,
+    keywords: isDarknet
+      ? [{ category: 'cyber', word: 'darknet' }, ...matches]
+      : matches,
     locations,
     companies,
     targets,
     mediaPath: null,
+    stream: isDarknet ? 'darknet' : 'telegram',
   };
   recentEvents.push(event);
   if (recentEvents.length > MAX_RECENT_EVENTS) {
@@ -100,11 +123,27 @@ chats.onEvent = async (payload) => {
   }
   send('tg:event', event);
 
-  // High-priority messages with media: download immediately, notify when ready.
   if (highPriority && payload.media && ['photo', 'video'].includes(payload.media.kind)) {
     downloadAndNotify(payload.chatId, payload.msgId, payload.key);
   }
-};
+}
+
+chats.onEvent = (payload) => processEvent(payload);
+
+const darknet = new DarknetScraper({ onEvent: (payload) => processEvent(payload) });
+
+function applyRuntimeSettings(cfg) {
+  currentSettings = cfg;
+  const sources = cfg.sources || { telegram: true, darknet: false };
+  const dn = cfg.darknet || {};
+  darknet.configure({
+    enabled: sources.darknet === true && dn.enabled !== false,
+    pollMinutes: dn.pollMinutes,
+    minSeverity: dn.minSeverity,
+    useTor: dn.useTor,
+    torProxy: dn.torProxy,
+  });
+}
 
 async function downloadAndNotify(chatId, msgId, key) {
   try {
@@ -190,8 +229,9 @@ function registerIpc() {
     return currentSettings;
   });
   ipcMain.handle('settings:set', (e, partial) => {
-    currentSettings = settings.save(partial);
-    return currentSettings;
+    const merged = settings.save(partial);
+    applyRuntimeSettings(merged); // profiles / source toggles take effect immediately
+    return merged;
   });
   ipcMain.handle('geocoder:info', () => ({
     source: geocoder.source,
@@ -206,6 +246,11 @@ function registerIpc() {
     listening: !!chats._handlerAttached,
     polling: !!chats._pollTimer,
   }));
+  ipcMain.handle('darknet:stats', () => ({ ...darknet.stats, cfg: darknet.cfg }));
+  ipcMain.handle('darknet:pollNow', async () => {
+    await darknet.poll();
+    return { ...darknet.stats };
+  });
   ipcMain.handle('app:openMediaDir', () => shell.openPath(MEDIA_DIR));
   ipcMain.handle('app:openLog', () => shell.showItemInFolder(require('./logger').LOG_PATH));
 }
@@ -288,9 +333,10 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
 
-  // Restore monitored chats from settings
+  // Restore monitored chats + darknet/source toggles from settings
   currentSettings = settings.load();
   chats.setMonitored(currentSettings.monitoredChats);
+  applyRuntimeSettings(currentSettings);
 
   if (process.env.GG_DEMO) startDemoFeed();
 
@@ -300,6 +346,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', async () => {
+  darknet.stop();
   await tg.disconnect();
   app.quit();
 });

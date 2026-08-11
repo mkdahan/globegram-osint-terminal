@@ -23,7 +23,11 @@ globe.onLoadTicker = (yahoo) => charts.addChart(yahoo);
 
 let settings = {
   tickers: [], monitoredChats: [], liveCandleRefreshSec: 15, moversRefreshSec: 60,
-  watch: { places: true, companies: true }, alarms: false, autoChartCompany: false, profiles: {},
+  watch: { places: true, companies: true },
+  sources: { telegram: true, darknet: false },
+  darknet: { enabled: true, pollMinutes: 5, minSeverity: 'MEDIUM', useTor: false },
+  ui: { sidebarOpen: true, chartsOpen: true },
+  alarms: false, autoChartCompany: false, profiles: {},
 };
 
 /* ================= alarm siren (WebAudio, no assets) ================= */
@@ -240,9 +244,11 @@ function handleEvent(event, { replay = false, fly = true } = {}) {
   if (fly) cameraQueue.push(event);
   charts.addEventMarker(event);
   if (!replay && settings && settings.alarms) fireAlarm(event);
-  if (settings && settings.autoChartCompany) {
+  // Auto-chart: settings flag, or always for darknet victims with a ticker
+  const isDarknet = event.stream === 'darknet';
+  if ((settings && settings.autoChartCompany) || isDarknet) {
     const co = targets.find((t) => t.kind === 'company' && t.yahoo);
-    if (co) charts.addChart(co.yahoo);
+    if (co && (settings.autoChartCompany || isDarknet)) charts.addChart(co.yahoo);
   }
 }
 
@@ -275,17 +281,21 @@ window.api.events.onMediaReady(({ key, path, error }) => {
 function addFeedCard(event) {
   const feed = $('event-feed');
   const card = document.createElement('div');
-  card.className = 'event-card' + (event.highPriority ? ' high' : '');
+  const isDarknet = event.stream === 'darknet' || String(event.source || '').startsWith('DARKNET');
+  card.className = 'event-card'
+    + (event.highPriority ? ' high' : '')
+    + (isDarknet ? ' darknet' : '');
 
   const meta = document.createElement('div');
   meta.className = 'meta';
   const time = new Date(event.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   meta.innerHTML =
     `<span>${time}</span><span>${escapeHtml(event.chatTitle)}</span>` +
-    event.keywords.map((k) => `<span class="kw">${k.category}</span>`).join('') +
-    (event.locations || []).map((l) => `<span class="loc">📍${escapeHtml(l.name)}</span>`).join('') +
+    (isDarknet ? '<span class="cyber">CTI</span>' : '') +
+    (event.keywords || []).map((k) => `<span class="kw ${k.category === 'cyber' ? 'cyber' : ''}">${k.category}</span>`).join('') +
+    (event.locations || []).map((l) => `<span class="loc">${escapeHtml(l.name)}</span>`).join('') +
     (event.companies || [])
-      .map((c) => `<span class="co">🏢${escapeHtml(c.companyName)}${c.ticker ? ` [${escapeHtml(c.ticker)}]` : ''}</span>`)
+      .map((c) => `<span class="co">${escapeHtml(c.companyName)}${c.ticker ? ` [${escapeHtml(c.ticker)}]` : ''}</span>`)
       .join('');
 
   const txt = document.createElement('div');
@@ -339,30 +349,104 @@ charts.onTickersChanged = (symbols) => {
   window.api.settings.set({ tickers: symbols });
 };
 
-/* ================= watch filters & options ================= */
+/* ================= panel dock toggles ================= */
+
+function applyUiPanels() {
+  const ui = settings.ui || { sidebarOpen: true, chartsOpen: true };
+  document.getElementById('app').classList.toggle('sidebar-collapsed', ui.sidebarOpen === false);
+  document.getElementById('app').classList.toggle('charts-collapsed', ui.chartsOpen === false);
+  $('toggle-sidebar').classList.toggle('active', ui.sidebarOpen !== false);
+  $('toggle-charts').classList.toggle('active', ui.chartsOpen !== false);
+  // Cesium needs a resize kick after layout change
+  setTimeout(() => {
+    try { globe.viewer.resize(); } catch { /* ignore */ }
+  }, 240);
+}
+
+function initDock() {
+  applyUiPanels();
+  $('toggle-sidebar').addEventListener('click', () => {
+    const open = !document.getElementById('app').classList.contains('sidebar-collapsed');
+    settings.ui = { ...(settings.ui || {}), sidebarOpen: !open };
+    applyUiPanels();
+    window.api.settings.set({ ui: settings.ui });
+  });
+  $('toggle-charts').addEventListener('click', () => {
+    const open = !document.getElementById('app').classList.contains('charts-collapsed');
+    settings.ui = { ...(settings.ui || {}), chartsOpen: !open };
+    applyUiPanels();
+    window.api.settings.set({ ui: settings.ui });
+  });
+}
+
+/* ================= watch filters & data sources ================= */
+
+function syncSourceUi() {
+  const sources = settings.sources || { telegram: true, darknet: false };
+  const dn = settings.darknet || {};
+  $('src-telegram').checked = sources.telegram !== false;
+  $('src-darknet').checked = sources.darknet === true;
+  $('dn-tor').checked = Boolean(dn.useTor);
+  $('dn-poll').value = String(dn.pollMinutes || 5);
+  $('dn-severity').value = dn.minSeverity || 'MEDIUM';
+  $('sources-panel').classList.toggle('darknet-on', sources.darknet === true);
+}
+
+async function persistConfig() {
+  settings.watch = {
+    places: $('watch-places').checked,
+    companies: $('watch-companies').checked,
+  };
+  settings.alarms = $('opt-alarms').checked;
+  settings.autoChartCompany = $('opt-autochart').checked;
+  settings.sources = {
+    telegram: $('src-telegram').checked,
+    darknet: $('src-darknet').checked,
+  };
+  settings.darknet = {
+    ...(settings.darknet || {}),
+    enabled: true,
+    useTor: $('dn-tor').checked,
+    pollMinutes: Number($('dn-poll').value) || 5,
+    minSeverity: $('dn-severity').value || 'MEDIUM',
+  };
+  $('sources-panel').classList.toggle('darknet-on', settings.sources.darknet);
+  // settings:set → main.applyRuntimeSettings — takes effect immediately
+  await window.api.settings.set({
+    watch: settings.watch,
+    alarms: settings.alarms,
+    autoChartCompany: settings.autoChartCompany,
+    sources: settings.sources,
+    darknet: settings.darknet,
+  });
+  refreshDarknetStatus();
+}
 
 function initToggles() {
   $('watch-places').checked = settings.watch.places !== false;
   $('watch-companies').checked = settings.watch.companies !== false;
   $('opt-alarms').checked = Boolean(settings.alarms);
   $('opt-autochart').checked = Boolean(settings.autoChartCompany);
+  syncSourceUi();
 
-  const persist = () => {
-    settings.watch = {
-      places: $('watch-places').checked,
-      companies: $('watch-companies').checked,
-    };
-    settings.alarms = $('opt-alarms').checked;
-    settings.autoChartCompany = $('opt-autochart').checked;
-    window.api.settings.set({
-      watch: settings.watch,
-      alarms: settings.alarms,
-      autoChartCompany: settings.autoChartCompany,
-    });
-  };
-  for (const id of ['watch-places', 'watch-companies', 'opt-alarms', 'opt-autochart']) {
-    $(id).addEventListener('change', persist);
+  for (const id of [
+    'watch-places', 'watch-companies', 'opt-alarms', 'opt-autochart',
+    'src-telegram', 'src-darknet', 'dn-tor', 'dn-poll', 'dn-severity',
+  ]) {
+    $(id).addEventListener('change', () => persistConfig());
   }
+  $('dn-poll-now').addEventListener('click', async () => {
+    $('dn-status').textContent = 'polling…';
+    try {
+      const s = await window.api.darknet.pollNow();
+      $('dn-status').textContent = `ok · ${s.emitted || 0} events`;
+      $('dn-status').className = 'status-line ok';
+    } catch (err) {
+      $('dn-status').textContent = err.message || 'error';
+      $('dn-status').className = 'status-line';
+    }
+  });
+
   // Unlock WebAudio on first user gesture so the siren can play later
   document.body.addEventListener(
     'click',
@@ -375,6 +459,27 @@ function initToggles() {
   );
 }
 
+async function refreshDarknetStatus() {
+  const el = $('dn-status');
+  if (!el || !window.api.darknet) return;
+  try {
+    const s = await window.api.darknet.stats();
+    if (!(settings.sources && settings.sources.darknet)) {
+      el.textContent = 'off';
+      el.className = 'status-line dim';
+      return;
+    }
+    const ago = s.lastPollAt ? Math.round((Date.now() - s.lastPollAt) / 1000) : null;
+    el.textContent = ago != null
+      ? `${s.emitted || 0} events · ${ago}s · tor:${s.torOk ? 'on' : 'off'}`
+      : 'waiting…';
+    el.className = 'status-line ok';
+    if (s.lastError) el.title = s.lastError;
+  } catch {
+    el.textContent = 'n/a';
+  }
+}
+
 /* ================= profiles ================= */
 
 function currentProfileSnapshot() {
@@ -382,6 +487,8 @@ function currentProfileSnapshot() {
     monitoredChats: [...settings.monitoredChats],
     tickers: charts.symbols,
     watch: { ...settings.watch },
+    sources: { ...(settings.sources || { telegram: true, darknet: false }) },
+    darknet: { ...(settings.darknet || {}) },
     alarms: settings.alarms,
     autoChartCompany: settings.autoChartCompany,
   };
@@ -403,31 +510,50 @@ async function applyProfile(name) {
   const prof = (settings.profiles || {})[name];
   if (!prof) return;
 
-  // Channels
+  // Channels — live immediately
   settings.monitoredChats = [...(prof.monitoredChats || [])];
   await window.api.chats.setMonitored(settings.monitoredChats);
   renderChatList();
 
   // Charts
-  for (const sym of charts.symbols) charts.removeChart(sym);
+  for (const sym of [...charts.symbols]) charts.removeChart(sym);
   for (const sym of prof.tickers || ['GLD']) await charts.addChart(sym);
 
-  // Watch flags / options
+  // Watch / sources / darknet / options — apply to UI then push to main
   settings.watch = { places: true, companies: true, ...(prof.watch || {}) };
+  settings.sources = {
+    telegram: true,
+    darknet: false,
+    ...(prof.sources || {}),
+  };
+  settings.darknet = {
+    enabled: true,
+    pollMinutes: 5,
+    minSeverity: 'MEDIUM',
+    useTor: false,
+    ...(settings.darknet || {}),
+    ...(prof.darknet || {}),
+  };
   settings.alarms = Boolean(prof.alarms);
   settings.autoChartCompany = Boolean(prof.autoChartCompany);
+
   $('watch-places').checked = settings.watch.places !== false;
   $('watch-companies').checked = settings.watch.companies !== false;
   $('opt-alarms').checked = settings.alarms;
   $('opt-autochart').checked = settings.autoChartCompany;
+  syncSourceUi();
 
+  // One settings:set call → main.applyRuntimeSettings (darknet start/stop, watch)
   await window.api.settings.set({
     monitoredChats: settings.monitoredChats,
     tickers: charts.symbols,
     watch: settings.watch,
+    sources: settings.sources,
+    darknet: settings.darknet,
     alarms: settings.alarms,
     autoChartCompany: settings.autoChartCompany,
   });
+  refreshDarknetStatus();
 }
 
 function initProfiles() {
@@ -494,6 +620,7 @@ async function boot() {
   }
   bootingCharts = false;
 
+  initDock();
   initToggles();
   initProfiles();
   await initAuth();
@@ -504,7 +631,9 @@ async function boot() {
   setInterval(refreshMovers, (settings.moversRefreshSec || 60) * 1000);
   setInterval(() => charts.refreshLive(), (settings.liveCandleRefreshSec || 15) * 1000);
   setInterval(refreshIngestStatus, 5000);
+  setInterval(refreshDarknetStatus, 8000);
   refreshIngestStatus();
+  refreshDarknetStatus();
 }
 
 async function refreshIngestStatus() {

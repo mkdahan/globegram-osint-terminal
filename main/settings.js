@@ -17,11 +17,23 @@ const DEFAULTS = {
   downloadAllMedia: false,
   // what to look for in messages
   watch: { places: true, companies: true },
+  // which ingest streams are live
+  sources: { telegram: true, darknet: false },
+  // Darknet / CTI module (optional; clearnet RSS works without Tor)
+  darknet: {
+    enabled: true, // honored only when sources.darknet is true
+    pollMinutes: 5,
+    minSeverity: 'MEDIUM',
+    useTor: false,
+    torProxy: 'socks5h://127.0.0.1:9050',
+  },
   // alarm (siren + desktop notification) on any place/company match
   alarms: false,
   // automatically mount a matched company's chart
   autoChartCompany: false,
-  // named monitoring profiles: { name: {monitoredChats, tickers, watch, alarms, autoChartCompany} }
+  // UI panel visibility
+  ui: { sidebarOpen: true, chartsOpen: true },
+  // named monitoring profiles
   profiles: {},
 };
 
@@ -39,7 +51,14 @@ function load() {
 }
 
 function save(partial) {
-  const merged = { ...load(), ...partial };
+  const cur = load();
+  const merged = { ...cur, ...partial };
+  // Deep-merge nested config objects so a partial update can't wipe keys
+  for (const key of ['watch', 'sources', 'darknet', 'ui']) {
+    if (partial[key] && typeof partial[key] === 'object') {
+      merged[key] = { ...(cur[key] || DEFAULTS[key] || {}), ...partial[key] };
+    }
+  }
   ensureDataDirs();
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(merged, null, 2), 'utf-8');
   return merged;
