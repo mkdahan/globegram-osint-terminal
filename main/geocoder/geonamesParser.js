@@ -44,6 +44,7 @@ const AR_CTX_STRONG = new Set(['في', 'بـ', 'قرب', 'بجانب', 'داخل
 const BLOCK_STEMS = new Set([
   'אזור', 'מרכז', 'דרום', 'צפון', 'מזרח', 'מערב', 'עיירה', 'עיר', 'כפר',
   'מפעל', 'מחסן', 'שדה', 'אזורי', 'רחוב', 'שכונה', 'גבעה',
+  'פרק', 'הפרק', // "על הפרק" = on the agenda, not Perak (MY)
   'over', 'near', 'area', 'region', 'center', 'centre', 'town', 'city',
   'village', 'facility', 'plant', 'factory', 'warehouse', 'district',
   'gat', // fragment of "Kiryat Gat"

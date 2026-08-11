@@ -8,11 +8,13 @@
 const fs = require('fs');
 const path = require('path');
 const { NewMessage } = require('telegram/events');
-const { MEDIA_DIR, ensureDataDirs } = require('../paths');
+const { MEDIA_DIR, SYNC_STATE_PATH, ensureDataDirs } = require('../paths');
 
 const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
-const POLL_MS = 12_000;
-const POLL_LIMIT = 15;
+// kikar_haishuk-style incremental sync: every few seconds fetch everything
+// after the persisted last msg id (server-side minId filter — nothing slips).
+const POLL_MS = 5_000;
+const FIRST_RUN_BACKLOG = 10; // messages to show for a chat we never synced
 
 /** Canonical string form (no BigInt "n" suffix, trimmed). */
 function canonId(id) {
@@ -54,9 +56,32 @@ class ChatManager {
     this._handlerAttached = false;
     this._chatTitles = new Map(); // any alias -> title
     this._seen = new Set(); // chatId:msgId already emitted
-    this._lastMsgId = new Map(); // primary chat id -> highest msg id polled
+    this._lastMsgId = new Map(); // primary chat id -> highest synced msg id (persisted)
     this._pollTimer = null;
-    this.stats = { received: 0, emitted: 0, skippedUnmonitored: 0, lastText: '', lastChat: '', lastAt: 0 };
+    this._polling = false;
+    this.stats = { received: 0, emitted: 0, skippedUnmonitored: 0, lastText: '', lastChat: '', lastAt: 0, lastPollAt: 0 };
+    this._loadSyncState();
+  }
+
+  _loadSyncState() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(SYNC_STATE_PATH, 'utf-8'));
+      for (const [id, msgId] of Object.entries(raw.lastMsgIds || {})) {
+        this._lastMsgId.set(id, Number(msgId) || 0);
+      }
+    } catch {
+      /* first run */
+    }
+  }
+
+  _saveSyncState() {
+    try {
+      ensureDataDirs();
+      const lastMsgIds = Object.fromEntries(this._lastMsgId);
+      fs.writeFileSync(SYNC_STATE_PATH, JSON.stringify({ lastMsgIds }, null, 2));
+    } catch (err) {
+      console.warn('[chatManager] sync state save failed:', err.message);
+    }
   }
 
   setMonitored(ids) {
@@ -112,14 +137,14 @@ class ChatManager {
     this.startPolling();
   }
 
-  /** Backup poll — GramJS update gaps happen; this catches missed posts. */
+  /** Incremental re-sync loop (kikar_haishuk method) — the source of truth. */
   startPolling() {
     if (!this._monitoredPrimary.length) return;
     if (!this._pollTimer) {
       this._pollTimer = setInterval(() => {
         this.pollMonitored().catch((err) => console.error('[chatManager] poll error:', err.message));
       }, POLL_MS);
-      console.log(`[chatManager] poll backup every ${POLL_MS / 1000}s`);
+      console.log(`[chatManager] incremental sync every ${POLL_MS / 1000}s`);
     }
     // Kick a poll soon (entity cache may not be ready at app boot)
     setTimeout(() => {
@@ -150,29 +175,43 @@ class ChatManager {
   }
 
   async pollMonitored() {
+    if (this._polling) return; // don't overlap slow rounds
     const client = this.tg.client;
     if (!client || !(await this.tg.isAuthorized())) return;
     if (!this._monitoredPrimary.length) return;
 
-    for (const chatId of this._monitoredPrimary) {
-      try {
-        const minId = this._lastMsgId.get(chatId) || 0;
-        const msgs = await this._fetchMessages(chatId, { limit: POLL_LIMIT });
-        if (!msgs || !msgs.length) continue;
-        // oldest → newest so feed order is natural
-        const ordered = [...msgs].reverse();
-        for (const msg of ordered) {
-          if (!msg || !msg.id) continue;
-          if (msg.id <= minId) continue;
-          await this._handleNewMessage(msg, 'poll');
-          this._lastMsgId.set(chatId, Math.max(this._lastMsgId.get(chatId) || 0, msg.id));
+    this._polling = true;
+    let dirty = false;
+    try {
+      for (const chatId of this._monitoredPrimary) {
+        try {
+          const minId = this._lastMsgId.get(chatId) || 0;
+          // Server-side filter: everything strictly after our watermark.
+          // First-ever sync of a chat: just the recent backlog.
+          const opts = minId > 0
+            ? { minId, limit: 200 }
+            : { limit: FIRST_RUN_BACKLOG };
+          const msgs = await this._fetchMessages(chatId, opts);
+          if (!msgs || !msgs.length) continue;
+          // oldest → newest so feed order is natural
+          const ordered = [...msgs].sort((a, b) => (a.id || 0) - (b.id || 0));
+          for (const msg of ordered) {
+            if (!msg || !msg.id || msg.id <= minId) continue;
+            await this._handleNewMessage(msg, 'sync');
+          }
+          const top = Math.max(minId, ...msgs.map((m) => m.id || 0));
+          if (top > minId) {
+            this._lastMsgId.set(chatId, top);
+            dirty = true;
+          }
+        } catch (err) {
+          console.warn(`[chatManager] sync ${chatId}:`, err.message);
         }
-        // Track high-water even if all were seen
-        const top = Math.max(...msgs.map((m) => m.id || 0));
-        if (top) this._lastMsgId.set(chatId, Math.max(this._lastMsgId.get(chatId) || 0, top));
-      } catch (err) {
-        console.warn(`[chatManager] poll ${chatId}:`, err.message);
       }
+    } finally {
+      this.stats.lastPollAt = Date.now();
+      if (dirty) this._saveSyncState();
+      this._polling = false;
     }
   }
 
@@ -223,10 +262,14 @@ class ChatManager {
       }
     }
 
-    // Advance poll watermark for this chat
+    // Advance sync watermark for this chat (persist so restarts don't re-emit)
     for (const id of this._monitoredPrimary) {
       if (chatIdAliases(id).has(canonId(chatId))) {
-        this._lastMsgId.set(id, Math.max(this._lastMsgId.get(id) || 0, msg.id));
+        const prev = this._lastMsgId.get(id) || 0;
+        if (msg.id > prev) {
+          this._lastMsgId.set(id, msg.id);
+          if (source === 'live') this._saveSyncState();
+        }
       }
     }
 

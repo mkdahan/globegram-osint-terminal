@@ -30,6 +30,7 @@ const SEED_GAZETTEER_PATH = path.join(ROOT, 'main', 'geocoder', 'seed-gazetteer.
 const COMPANIES_PATH = path.join(DATA_DIR, 'companies.json');
 const BUNDLED_COMPANIES_PATH = path.join(ROOT, 'main', 'corporate', 'bundled-companies.json');
 const SEED_COMPANIES_PATH = path.join(ROOT, 'main', 'corporate', 'seed-companies.json');
+const SYNC_STATE_PATH = path.join(DATA_DIR, 'sync-state.json');
 
 function ensureDataDirs() {
   for (const p of [DATA_DIR, MEDIA_DIR]) {
@@ -50,5 +51,6 @@ module.exports = {
   COMPANIES_PATH,
   BUNDLED_COMPANIES_PATH,
   SEED_COMPANIES_PATH,
+  SYNC_STATE_PATH,
   ensureDataDirs,
 };
