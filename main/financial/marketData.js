@@ -10,7 +10,13 @@ async function yf() {
   const mod = await import('yahoo-finance2');
   // v3: default export is a class to instantiate; v2: ready-made instance.
   const D = mod.default;
-  _yf = typeof D === 'function' ? new D({ suppressNotices: ['yahooSurvey', 'ripHistorical'] }) : D;
+  _yf = typeof D === 'function'
+    ? new D({
+      suppressNotices: ['yahooSurvey', 'ripHistorical'],
+      // Yahoo often returns schema-drifted chart payloads; don't spam app.log
+      validation: { logErrors: false },
+    })
+    : D;
   return _yf;
 }
 
@@ -32,11 +38,18 @@ async function getCandles(symbol, opts = {}) {
   start.setTime(start.getTime() - 6 * 3600 * 1000); // pad for exchanges behind local tz
   const end = new Date(Math.min(start.getTime() + 36 * 3600 * 1000, Date.now()));
 
-  const result = await api.chart(symbol, {
-    period1: start,
-    period2: end,
-    interval,
-  });
+  let result;
+  try {
+    result = await api.chart(
+      symbol,
+      { period1: start, period2: end, interval },
+      { validateResult: false }
+    );
+  } catch (err) {
+    // Schema drift / empty sessions — don't bury app.log in yahoo noise
+    console.warn(`[market] chart ${symbol}:`, err.message);
+    return [];
+  }
   const quotes = (result && result.quotes) || [];
   return quotes
     .filter((q) => q.open != null && q.close != null)

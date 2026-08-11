@@ -247,9 +247,12 @@ function handleEvent(event, { replay = false, fly = true } = {}) {
   // Sticky card + WhatsApp bubble from the origin place (first / "from")
   const origin = event.origin || targets[0];
   globe.showPopup(event, origin);
-  if (fly) {
+  // Catch-up sync can dump dozens of msgs in 1s (see app.log) — that made the
+  // camera thrash. Only fly for live/darknet, or an explicit backlog replay.
+  const isCatchupSync = event.source === 'sync' && !replay;
+  if (fly && !isCatchupSync) {
     cameraQueue.push(event); // flies, then bumps bubble from origin
-  } else {
+  } else if (!isCatchupSync) {
     globe.showBubble(event, origin);
   }
   charts.addEventMarker(event);

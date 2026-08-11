@@ -10,7 +10,9 @@ async function yf() {
   const mod = await import('yahoo-finance2');
   // v3: default export is a class to instantiate; v2: ready-made instance.
   const D = mod.default;
-  _yf = typeof D === 'function' ? new D({ suppressNotices: ['yahooSurvey'] }) : D;
+  _yf = typeof D === 'function'
+    ? new D({ suppressNotices: ['yahooSurvey'], validation: { logErrors: false } })
+    : D;
   return _yf;
 }
 
