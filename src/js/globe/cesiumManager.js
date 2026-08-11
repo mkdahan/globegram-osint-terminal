@@ -123,11 +123,43 @@ export class CesiumManager {
   }
 
   /**
-   * Add globe entities for a geo-event. Each target is either a
-   * {kind:'place'} geographic match or a {kind:'company'} HQ match.
+   * Show ONLY this event on the globe (pins + route lines).
+   * Clears the previous focused message's graphics first — so when the
+   * camera queue advances, old lines/places disappear and the new
+   * connections appear at runtime.
    */
+  focusEvent(event) {
+    if (!event) return;
+    this.clearFocus();
+    this._drawEvent(event);
+    this._focusKey = event.key;
+  }
+
+  /** Remove all place pins, route lines, and place-bubbles currently shown. */
+  clearFocus() {
+    for (const { entities } of this.events.values()) {
+      for (const ent of entities) {
+        try { this.viewer.entities.remove(ent); } catch { /* already gone */ }
+      }
+    }
+    this.events.clear();
+    this._focusKey = null;
+    this.clearBubbles();
+  }
+
+  clearBubbles() {
+    for (const b of this._bubbles) {
+      try { b.el.remove(); } catch { /* ignore */ }
+    }
+    this._bubbles = [];
+  }
+
+  /** @deprecated use focusEvent — kept so older call sites still compile */
   addEvent(event) {
-    if (this.events.has(event.key)) return;
+    this.focusEvent(event);
+  }
+
+  _drawEvent(event) {
     const start = Cesium.JulianDate.fromDate(new Date(event.date));
     const stop = Cesium.JulianDate.addHours(start, EVENT_VISIBILITY_HOURS, new Cesium.JulianDate());
     const availability = new Cesium.TimeIntervalCollection([
@@ -136,6 +168,7 @@ export class CesiumManager {
 
     const isDarknet = event.stream === 'darknet' || String(event.source || '').startsWith('DARKNET');
     const entities = [];
+    const stamp = Date.now(); // unique entity ids across focus swaps
     (event.targets || []).forEach((target, i) => {
       const isCompany = target.kind === 'company';
       let color;
@@ -150,7 +183,7 @@ export class CesiumManager {
           : target.name;
 
       const entity = this.viewer.entities.add({
-        id: `${event.key}:t${i}`,
+        id: `focus:${stamp}:t${i}`,
         availability,
         position: Cesium.Cartesian3.fromDegrees(target.lon, target.lat),
         point: {
@@ -176,9 +209,8 @@ export class CesiumManager {
       entities.push(entity);
     });
 
-    // From→to arrows (directed) or plain links (undirected)
     for (const route of event.routes || []) {
-      const ent = this._addRouteEntity(event, route, start, availability);
+      const ent = this._addRouteEntity(event, route, availability, stamp);
       if (ent) entities.push(ent);
     }
 
@@ -188,7 +220,7 @@ export class CesiumManager {
   /**
    * Great-circle polyline. Directed → arrow material; else soft glow line.
    */
-  _addRouteEntity(event, route, start, availability) {
+  _addRouteEntity(event, route, availability, stamp = Date.now()) {
     if (!route.from || !route.to) return null;
     const isDarknet = event.stream === 'darknet';
     const color = isDarknet
@@ -204,7 +236,7 @@ export class CesiumManager {
       : new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.2, color: color.withAlpha(0.85) });
 
     const entity = this.viewer.entities.add({
-      id: `${event.key}:route:${route.from.name}->${route.to.name}:${route.pattern}`,
+      id: `focus:${stamp}:route:${route.from.name}->${route.to.name}:${route.pattern}`,
       availability,
       polyline: {
         positions,

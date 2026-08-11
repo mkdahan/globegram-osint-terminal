@@ -68,6 +68,10 @@ export class CameraQueue {
     );
     this._busyUntil = Date.now() + (burst ? 1500 : minStay * 1000);
 
+    // Swap globe graphics NOW: previous pins/lines vanish, this message's
+    // places + connections appear while the camera flies to them.
+    this.cesium.focusEvent(event);
+
     const done = () => {
       if (this.onArrive) this.onArrive(event, origin);
       // Bubble bumps from the origin place

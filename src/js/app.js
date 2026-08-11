@@ -243,17 +243,20 @@ function handleEvent(event, { replay = false, fly = true } = {}) {
   if (!targets.length) return;
   // Stamp min display time so the queue / bubbles honor the setting
   event.popupMinSec = settings.popupMinSec || event.popupMinSec || 6;
-  globe.addEvent(event); // pins + from→to arrows
-  // Sticky card + WhatsApp bubble from the origin place (first / "from")
   const origin = event.origin || targets[0];
-  globe.showPopup(event, origin);
   // Catch-up sync can dump dozens of msgs in 1s (see app.log) — that made the
   // camera thrash. Only fly for live/darknet, or an explicit backlog replay.
+  // Globe pins/lines are drawn when the queue focuses each message (old ones clear).
   const isCatchupSync = event.source === 'sync' && !replay;
   if (fly && !isCatchupSync) {
-    cameraQueue.push(event); // flies, then bumps bubble from origin
+    cameraQueue.push(event); // focusEvent + fly + bubble when it's this msg's turn
   } else if (!isCatchupSync) {
+    globe.focusEvent(event);
+    globe.showPopup(event, origin);
     globe.showBubble(event, origin);
+  } else {
+    // Catch-up: feed only — no globe clutter until user clicks the card
+    globe.showPopup(event, origin);
   }
   charts.addEventMarker(event);
   if (!replay && settings && settings.alarms) fireAlarm(event);
@@ -318,17 +321,23 @@ function addFeedCard(event) {
   card.append(meta, txt);
   card.addEventListener('click', () => {
     const targets = event.targets || [];
-    if (targets.length) {
-      const loc = targets[0];
+    if (!targets.length) return;
+    const loc = event.origin || targets[0];
+    // Show only this message's places + lines (clears whatever was focused)
+    globe.focusEvent(event);
+    globe.showPopup(event, loc);
+    globe.showBubble(event, loc);
+    const route = (event.routes || [])[0];
+    if (route && route.from && route.to) {
+      cameraQueue._flyRoute(route, 1.5, () => {});
+    } else {
       globe.viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, 120000),
         duration: 1.5,
-        complete: () => globe.showPopup(event, loc),
       });
-      // request media on demand for low-priority events
-      if (event.media && !event.mediaPath) {
-        window.api.events.requestMedia(event.chatId, event.msgId, event.key);
-      }
+    }
+    if (event.media && !event.mediaPath) {
+      window.api.events.requestMedia(event.chatId, event.msgId, event.key);
     }
   });
   feed.prepend(card);
