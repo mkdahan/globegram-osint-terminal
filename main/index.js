@@ -7,6 +7,8 @@
 const path = require('path');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 
+require('./logger').install(); // before anything that logs (GramJS included)
+
 const secureStore = require('./secureStore');
 const settings = require('./settings');
 const { TelegramService } = require('./tdlib/client');
@@ -205,6 +207,7 @@ function registerIpc() {
     polling: !!chats._pollTimer,
   }));
   ipcMain.handle('app:openMediaDir', () => shell.openPath(MEDIA_DIR));
+  ipcMain.handle('app:openLog', () => shell.showItemInFolder(require('./logger').LOG_PATH));
 }
 
 /* ---------------- window ---------------- */

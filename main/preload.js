@@ -46,4 +46,5 @@ contextBridge.exposeInMainWorld('api', {
   },
   geocoderInfo: () => ipcRenderer.invoke('geocoder:info'),
   openMediaDir: () => ipcRenderer.invoke('app:openMediaDir'),
+  openLog: () => ipcRenderer.invoke('app:openLog'),
 });
