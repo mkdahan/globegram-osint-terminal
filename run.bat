@@ -14,6 +14,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem Auto-update: grab the latest version from GitHub (skipped quietly if offline)
+where git >nul 2>nul
+if not errorlevel 1 (
+    if exist ".git" (
+        echo [update] Checking GitHub for updates...
+        git pull --ff-only origin master
+        if errorlevel 1 echo [update] Could not auto-update - starting with current version.
+    )
+)
+
 if not exist "node_modules\electron\dist\electron.exe" (
     echo [setup] Installing dependencies - one time only...
     call npm install
