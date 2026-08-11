@@ -36,9 +36,13 @@ html, body {
   flex-direction: column;
   padding: 10px;
   gap: 10px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto; /* whole left menu scrolls — config panels were unreachable */
+  min-height: 0;
   transition: width 0.22s ease, min-width 0.22s ease, padding 0.22s ease, opacity 0.18s ease;
 }
+#sidebar::-webkit-scrollbar { width: 8px; }
+#sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 #app.sidebar-collapsed #sidebar {
   width: 0;
   min-width: 0;
@@ -66,7 +70,15 @@ html, body {
   flex-direction: column;
   gap: 8px;
 }
-.panel.grow { flex: 1; min-height: 120px; }
+.panel.grow {
+  flex: 1 1 auto;
+  min-height: 160px;
+  /* feed scrolls inside itself when sidebar is tall enough */
+}
+#feed-panel .scroll {
+  max-height: min(42vh, 420px);
+  min-height: 120px;
+}
 
 .panel h2 {
   font-size: 11px;
@@ -218,7 +230,7 @@ button.mini { padding: 1px 7px; font-size: 12px; }
 }
 
 /* ---------------- main ---------------- */
-#main { flex: 1; display: flex; min-width: 0; }
+#main { flex: 1; display: flex; min-width: 0; min-height: 0; }
 
 #globe-wrap { flex: 1.4; position: relative; min-width: 0; border-right: 1px solid var(--border); }
 #cesiumContainer { position: absolute; inset: 0; }
@@ -302,7 +314,9 @@ button.mini { padding: 1px 7px; font-size: 12px; }
   display: flex;
   flex-direction: column;
   min-width: 380px;
+  min-height: 0; /* required for flex child overflow scroll */
   background: var(--bg-2);
+  overflow: hidden;
   transition: flex 0.22s ease, min-width 0.22s ease, opacity 0.18s ease, border 0.22s ease;
 }
 #app.charts-collapsed #charts-col {
@@ -315,9 +329,20 @@ button.mini { padding: 1px 7px; font-size: 12px; }
   border: none;
 }
 #app.charts-collapsed #globe-wrap { border-right: none; }
-#charts-toolbar { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
+#charts-toolbar { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 #charts-toolbar input { flex: 1; text-transform: uppercase; }
-#charts-grid { flex: 1; display: grid; grid-template-columns: 1fr; grid-auto-rows: minmax(180px, 1fr); gap: 1px; overflow-y: auto; }
+#charts-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: minmax(200px, 280px);
+  gap: 1px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+#charts-grid::-webkit-scrollbar { width: 8px; }
+#charts-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 #charts-grid.two-col { grid-template-columns: 1fr 1fr; }
 
 .chart-cell { position: relative; background: var(--bg); border: 1px solid var(--border); min-height: 180px; display: flex; flex-direction: column; }
