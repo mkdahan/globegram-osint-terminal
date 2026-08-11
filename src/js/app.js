@@ -225,24 +225,45 @@ $('refresh-chats').addEventListener('click', loadChats);
 const eventsByKey = new Map();
 const MAX_FEED = 200;
 
-window.api.events.onTelegramEvent((event) => {
+window.api.events.onTelegramEvent((event) => handleEvent(event));
+
+function handleEvent(event, { replay = false, fly = true } = {}) {
+  if (eventsByKey.has(event.key)) return; // live + backlog replay dedupe
   eventsByKey.set(event.key, event);
   addFeedCard(event);
   const targets = event.targets || [];
-  if (targets.length) {
-    globe.addEvent(event);
-    // Sticky card updates immediately so the last match never disappears
-    // while the camera queue is still flying / waiting.
-    globe.showPopup(event, targets[0]);
-    cameraQueue.push(event);
-    charts.addEventMarker(event);
-    if (settings.alarms) fireAlarm(event);
-    if (settings.autoChartCompany) {
-      const co = targets.find((t) => t.kind === 'company' && t.yahoo);
-      if (co) charts.addChart(co.yahoo);
-    }
+  if (!targets.length) return;
+  globe.addEvent(event);
+  // Sticky card updates immediately so the last match never disappears
+  // while the camera queue is still flying / waiting.
+  globe.showPopup(event, targets[0]);
+  if (fly) cameraQueue.push(event);
+  charts.addEventMarker(event);
+  if (!replay && settings && settings.alarms) fireAlarm(event);
+  if (settings && settings.autoChartCompany) {
+    const co = targets.find((t) => t.kind === 'company' && t.yahoo);
+    if (co) charts.addChart(co.yahoo);
   }
-});
+}
+
+/**
+ * Startup catch-up: events processed while this window was still loading
+ * (or from previous minutes of this session) — pins for all, camera
+ * flights for the most recent few, no alarm sounds for old news.
+ */
+async function replayBacklog() {
+  if (!window.api.events.backlog) return;
+  try {
+    const backlog = (await window.api.events.backlog()) || [];
+    const withTargets = backlog.filter((e) => (e.targets || []).length && !eventsByKey.has(e.key));
+    const flyKeys = new Set(withTargets.slice(-10).map((e) => e.key));
+    for (const ev of backlog) {
+      handleEvent(ev, { replay: true, fly: flyKeys.has(ev.key) });
+    }
+  } catch (err) {
+    console.warn('backlog replay:', err);
+  }
+}
 
 window.api.events.onMediaReady(({ key, path, error }) => {
   if (error) return console.warn('media error:', error);
@@ -476,6 +497,9 @@ async function boot() {
   initToggles();
   initProfiles();
   await initAuth();
+  await replayBacklog();
+  // Second pass: the first catch-up sync may still have been in flight
+  setTimeout(replayBacklog, 10_000);
   refreshMovers();
   setInterval(refreshMovers, (settings.moversRefreshSec || 60) * 1000);
   setInterval(() => charts.refreshLive(), (settings.liveCandleRefreshSec || 15) * 1000);

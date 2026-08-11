@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('api', {
     requestMedia: (chatId, msgId, key) =>
       ipcRenderer.invoke('tg:downloadMedia', { chatId, msgId, key }),
     stats: () => ipcRenderer.invoke('tg:stats'),
+    backlog: () => ipcRenderer.invoke('tg:backlog'),
   },
   market: {
     candles: (symbol, dateMs, interval) =>

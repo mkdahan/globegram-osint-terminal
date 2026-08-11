@@ -29,6 +29,12 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+// Events emitted before the renderer finishes loading (startup catch-up sync
+// starts seconds after launch, Cesium takes longer) would be lost — buffer
+// them so the UI can replay the backlog once it is ready.
+const recentEvents = [];
+const MAX_RECENT_EVENTS = 300;
+
 /* ---------------- Telegram event pipeline ---------------- */
 
 tg.onAuthStateChange = (state) => send('auth:state', state);
@@ -86,6 +92,10 @@ chats.onEvent = async (payload) => {
     targets,
     mediaPath: null,
   };
+  recentEvents.push(event);
+  if (recentEvents.length > MAX_RECENT_EVENTS) {
+    recentEvents.splice(0, recentEvents.length - MAX_RECENT_EVENTS);
+  }
   send('tg:event', event);
 
   // High-priority messages with media: download immediately, notify when ready.
@@ -187,6 +197,7 @@ function registerIpc() {
     companySource: companyParser.source,
     companies: companyParser.companies.length,
   }));
+  ipcMain.handle('tg:backlog', () => recentEvents);
   ipcMain.handle('tg:stats', () => ({
     ...chats.stats,
     monitored: chats._monitoredPrimary || [],
