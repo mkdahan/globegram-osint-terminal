@@ -27,14 +27,14 @@ const DEFAULTS = {
     useTor: false,
     torProxy: 'socks5h://127.0.0.1:9050',
   },
-  // alarm (siren + desktop notification) on any place/company match
+  // alarm siren (in-app only — no OS desktop notifications)
   alarms: false,
   // automatically mount a matched company's chart
   autoChartCompany: false,
   // UI panel visibility
   ui: { sidebarOpen: true, chartsOpen: true },
-  // Minimum seconds a place-bubble / message stays visible on the globe
-  popupMinSec: 6,
+  // Seconds each globe event stays before the queue shows the next one
+  popupMinSec: 8,
   // named monitoring profiles
   profiles: {},
 };

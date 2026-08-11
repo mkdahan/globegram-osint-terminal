@@ -20,6 +20,7 @@ const marketData = require('./financial/marketData');
 const topMovers = require('./financial/topMovers');
 const { DarknetScraper } = require('./darknet/darknetScraper');
 const { extractRoutes } = require('./geocoder/relationExtractor');
+const { logDecision } = require('./decisionLog');
 const { ensureDataDirs, MEDIA_DIR } = require('./paths');
 
 let win = null;
@@ -53,8 +54,26 @@ async function processEvent(payload) {
 
   // Source gate — profiles / Data Sources toggles apply immediately
   const sources = (currentSettings && currentSettings.sources) || { telegram: true, darknet: false };
-  if (isDarknet && sources.darknet === false) return;
-  if (!isDarknet && payload.chatId !== 'demo' && sources.telegram === false) return;
+  if (isDarknet && sources.darknet === false) {
+    logDecision({
+      action: 'skipped_source',
+      stream: 'darknet',
+      chatTitle: payload.chatTitle,
+      text: (payload.text || '').slice(0, 240),
+      reason: 'darknet source disabled',
+    });
+    return;
+  }
+  if (!isDarknet && payload.chatId !== 'demo' && sources.telegram === false) {
+    logDecision({
+      action: 'skipped_source',
+      stream: 'telegram',
+      chatTitle: payload.chatTitle,
+      text: (payload.text || '').slice(0, 240),
+      reason: 'telegram source disabled',
+    });
+    return;
+  }
 
   const { highPriority: kwHigh, matches } = keywordFilter.classify(payload.text);
   const highPriority = Boolean(payload.highPriorityHint) || kwHigh || isDarknet;
@@ -119,6 +138,7 @@ async function processEvent(payload) {
   // From→to routes (arrows) or undirected links between places/companies
   const placeLike = finalTargets.filter((t) => t.lat != null && t.lon != null);
   const { routes, origin } = extractRoutes(searchText || '', placeLike);
+  const popupMinSec = (currentSettings && currentSettings.popupMinSec) || 8;
 
   const event = {
     ...payload,
@@ -133,8 +153,44 @@ async function processEvent(payload) {
     origin: origin || finalTargets[0] || null,
     mediaPath: null,
     stream: isDarknet ? 'darknet' : 'telegram',
-    popupMinSec: (currentSettings && currentSettings.popupMinSec) || 6,
+    popupMinSec,
   };
+
+  const action = finalTargets.length
+    ? (routes.length
+      ? (routes.some((r) => r.directed) ? 'globe_arrow' : 'globe_link')
+      : 'globe_pin')
+    : 'feed_only';
+
+  logDecision({
+    action,
+    stream: event.stream,
+    source: payload.source || payload.chatId,
+    chatTitle: payload.chatTitle,
+    msgId: payload.msgId,
+    key: payload.key,
+    text: (payload.text || '').slice(0, 400),
+    victim: payload.victim || null,
+    groupName: payload.groupName || null,
+    keywords: (event.keywords || []).map((k) => k.category),
+    places: (locations || []).map((l) => ({
+      name: l.name, word: l.matchedWord, score: l.locativeScore, cc: l.cc,
+    })),
+    companies: (companies || []).map((c) => ({
+      name: c.companyName, word: c.matchedWord, ticker: c.ticker,
+    })),
+    targets: finalTargets.map((t) => ({ kind: t.kind, name: t.name, cc: t.cc })),
+    origin: event.origin ? { name: event.origin.name, cc: event.origin.cc } : null,
+    routes: (routes || []).map((r) => ({
+      directed: r.directed,
+      pattern: r.pattern,
+      from: r.from && r.from.name,
+      to: r.to && r.to.name,
+    })),
+    popupMinSec,
+    highPriority,
+  });
+
   recentEvents.push(event);
   if (recentEvents.length > MAX_RECENT_EVENTS) {
     recentEvents.splice(0, recentEvents.length - MAX_RECENT_EVENTS);
@@ -271,6 +327,16 @@ function registerIpc() {
   });
   ipcMain.handle('app:openMediaDir', () => shell.openPath(MEDIA_DIR));
   ipcMain.handle('app:openLog', () => shell.showItemInFolder(require('./logger').LOG_PATH));
+  ipcMain.handle('app:openDecisionsLog', () => {
+    const { LOG_PATH } = require('./decisionLog');
+    ensureDataDirs();
+    try {
+      if (!require('fs').existsSync(LOG_PATH)) {
+        require('fs').writeFileSync(LOG_PATH, '', 'utf-8');
+      }
+    } catch { /* ignore */ }
+    return shell.showItemInFolder(LOG_PATH);
+  });
 }
 
 /* ---------------- window ---------------- */

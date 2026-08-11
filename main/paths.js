@@ -31,6 +31,7 @@ const COMPANIES_PATH = path.join(DATA_DIR, 'companies.json');
 const BUNDLED_COMPANIES_PATH = path.join(ROOT, 'main', 'corporate', 'bundled-companies.json');
 const SEED_COMPANIES_PATH = path.join(ROOT, 'main', 'corporate', 'seed-companies.json');
 const SYNC_STATE_PATH = path.join(DATA_DIR, 'sync-state.json');
+const DECISIONS_LOG_PATH = path.join(DATA_DIR, 'decisions.jsonl');
 
 function ensureDataDirs() {
   for (const p of [DATA_DIR, MEDIA_DIR]) {
@@ -52,5 +53,6 @@ module.exports = {
   BUNDLED_COMPANIES_PATH,
   SEED_COMPANIES_PATH,
   SYNC_STATE_PATH,
+  DECISIONS_LOG_PATH,
   ensureDataDirs,
 };

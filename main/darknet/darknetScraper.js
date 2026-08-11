@@ -121,9 +121,9 @@ class DarknetScraper {
         try {
           let items = await this._fetchFeed(feed);
           feedsOk++;
-          // First poll: only the freshest handful so enabling CTI doesn't
-          // dump 80 pins onto the globe. Later polls are incremental via _seen.
-          if (!this._primed) items = items.slice(0, 8);
+          // First poll: only a few so enabling CTI doesn't flood the camera
+          // queue. Later polls are incremental via _seen.
+          if (!this._primed) items = items.slice(0, 3);
           for (const item of items) {
             await this._emitItem(feed, item);
           }

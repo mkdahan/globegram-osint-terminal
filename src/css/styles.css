@@ -329,6 +329,11 @@ button.mini { padding: 1px 7px; font-size: 12px; }
   border: none;
 }
 #app.charts-collapsed #globe-wrap { border-right: none; }
+#display-settings {
+  margin: 8px;
+  flex-shrink: 0;
+}
+#display-settings .hint { margin: 0; }
 #charts-toolbar { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 #charts-toolbar input { flex: 1; text-transform: uppercase; }
 #charts-grid {

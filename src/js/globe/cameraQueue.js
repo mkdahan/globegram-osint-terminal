@@ -1,15 +1,17 @@
 /**
  * FIFO camera fly-to queue.
  * Flies to an event's origin (bubble place). When the event has a from→to
- * route, frames both ends so the arrow is visible. Respects popupMinSec so
- * bubbles stay readable before the next flight.
+ * route, frames both ends so the arrow is visible.
+ *
+ * Stay time ALWAYS honors popupMinSec / intervalSec — a long queue never
+ * shortens how long the user gets to read a message (darknet bursts used
+ * to collapse this to 1.5s).
  */
 /* global Cesium */
 
-const DEFAULT_INTERVAL_SEC = 4;
+const DEFAULT_INTERVAL_SEC = 8;
 const NORMAL_HEIGHT = 120_000;
-const BURST_HEIGHT = 600_000;
-const BURST_THRESHOLD = 8;
+const STACK_HEIGHT = 900_000;
 const ROUTE_HEIGHT = 2_800_000;
 
 export class CameraQueue {
@@ -46,7 +48,7 @@ export class CameraQueue {
   }
 
   setIntervalSec(sec) {
-    this.intervalSec = Math.max(1, Number(sec) || DEFAULT_INTERVAL_SEC);
+    this.intervalSec = Math.max(3, Number(sec) || DEFAULT_INTERVAL_SEC);
   }
 
   _tick() {
@@ -56,17 +58,18 @@ export class CameraQueue {
     }
     if (Date.now() < this._busyUntil) return;
 
-    const burst = this.queue.length > BURST_THRESHOLD;
-    const flyDuration = burst ? 1.0 : 2.2;
-
     const event = this.queue.shift();
     const origin = event.origin || event.targets[0];
     const routes = event.routes || [];
+    // Readable pacing — never collapse below the user's setting
     const minStay = Math.max(
+      3,
       this.intervalSec,
       Number(event.popupMinSec) || this.intervalSec
     );
-    this._busyUntil = Date.now() + (burst ? 1500 : minStay * 1000);
+    const flyDuration = routes.length ? 2.4 : 2.0;
+    // Stay clock starts when we BEGIN showing this event (includes fly time)
+    this._busyUntil = Date.now() + minStay * 1000;
 
     // Swap globe graphics NOW: previous pins/lines vanish, this message's
     // places + connections appear while the camera flies to them.
@@ -74,19 +77,20 @@ export class CameraQueue {
 
     const done = () => {
       if (this.onArrive) this.onArrive(event, origin);
-      // Bubble bumps from the origin place
       this.cesium.showBubble(event, origin);
     };
 
-    if (!burst && routes.length && routes[0].from && routes[0].to) {
+    if (routes.length && routes[0].from && routes[0].to) {
       this._flyRoute(routes[0], flyDuration, done);
-    } else {
-      const height = burst ? BURST_HEIGHT : NORMAL_HEIGHT;
+    } else if (origin) {
+      const height = this.queue.length > 12 ? STACK_HEIGHT : NORMAL_HEIGHT;
       this.cesium.viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(origin.lon, origin.lat, height),
         duration: flyDuration,
         complete: done,
       });
+    } else {
+      done();
     }
     this._updateBadge();
   }
@@ -96,7 +100,6 @@ export class CameraQueue {
     const { from, to } = route;
     const midLat = (from.lat + to.lat) / 2;
     const midLon = (from.lon + to.lon) / 2;
-    // Rough distance → height so both ends fit
     const dLat = Math.abs(from.lat - to.lat);
     const dLon = Math.abs(from.lon - to.lon) * Math.cos((midLat * Math.PI) / 180);
     const deg = Math.sqrt(dLat * dLat + dLon * dLon);
@@ -112,7 +115,7 @@ export class CameraQueue {
   _updateBadge() {
     if (!this._badge) return;
     if (this.queue.length) {
-      this._badge.textContent = `QUEUE ${this.queue.length}${this.queue.length > BURST_THRESHOLD ? ' ⚡BURST' : ''}`;
+      this._badge.textContent = `QUEUE ${this.queue.length} · ${this.intervalSec}s each`;
       this._badge.classList.remove('hidden');
     } else {
       this._badge.classList.add('hidden');

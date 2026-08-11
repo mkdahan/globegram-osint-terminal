@@ -14,11 +14,12 @@ const $ = (id) => document.getElementById(id);
 const globe = new CesiumManager('cesiumContainer');
 const charts = new ChartManager($('charts-grid'), (unixMs) => sync.onChartClick(unixMs));
 const sync = new TimeSync(globe, charts);
-// Camera flies to origin; on arrive refresh sticky card (bubble is shown by CameraQueue).
+// Camera flies to origin; on arrive refresh sticky card.
+// Place-bubble is shown by CameraQueue for Telegram and Darknet alike.
 const cameraQueue = new CameraQueue(globe, (event, loc) => {
-  // Only overwrite sticky card if this is still the newest match
-  if (globe.lastEvent && globe.lastEvent.date > event.date) return;
-  globe.showPopup(event, loc || event.origin || (event.targets && event.targets[0]));
+  const origin = loc || event.origin || (event.targets && event.targets[0]);
+  if (!origin) return;
+  globe.showPopup(event, origin);
 });
 
 // Corporate popup "Load <TICKER> chart" button
@@ -30,7 +31,7 @@ let settings = {
   sources: { telegram: true, darknet: false },
   darknet: { enabled: true, pollMinutes: 5, minSeverity: 'MEDIUM', useTor: false },
   ui: { sidebarOpen: true, chartsOpen: true },
-  popupMinSec: 6,
+  popupMinSec: 8,
   alarms: false, autoChartCompany: false, profiles: {},
 };
 
@@ -63,16 +64,8 @@ function playAlarm() {
 }
 
 function fireAlarm(event) {
+  // In-app siren only — no OS / Electron desktop notifications
   playAlarm();
-  try {
-    const what = event.targets.map((t) => t.name).join(', ');
-    new Notification(`🚨 ${event.chatTitle}`, {
-      body: `${what}\n${(event.text || '').slice(0, 120)}`,
-      silent: true, // we play our own siren
-    });
-  } catch (err) {
-    console.warn('notification failed:', err);
-  }
 }
 
 /* ================= auth UI ================= */
@@ -242,22 +235,22 @@ function handleEvent(event, { replay = false, fly = true } = {}) {
   const targets = event.targets || [];
   if (!targets.length) return;
   // Stamp min display time so the queue / bubbles honor the setting
-  event.popupMinSec = settings.popupMinSec || event.popupMinSec || 6;
+  event.popupMinSec = settings.popupMinSec || event.popupMinSec || 8;
   const origin = event.origin || targets[0];
-  // Catch-up sync can dump dozens of msgs in 1s (see app.log) — that made the
-  // camera thrash. Only fly for live/darknet, or an explicit backlog replay.
-  // Globe pins/lines are drawn when the queue focuses each message (old ones clear).
+  // Telegram + Darknet share the same path: queue → focus pins/arrows →
+  // fly → WhatsApp bubble from the origin place. Catch-up sync stays feed-only
+  // so a startup dump does not thrash the camera.
   const isCatchupSync = event.source === 'sync' && !replay;
-  if (fly && !isCatchupSync) {
-    cameraQueue.push(event); // focusEvent + fly + bubble when it's this msg's turn
+  const isDarknetStream = event.stream === 'darknet';
+  if (fly && (!isCatchupSync || isDarknetStream || replay)) {
+    // Darknet has no "sync" watermark source — always queue for globe display
+    cameraQueue.push(event);
   } else if (!isCatchupSync) {
     globe.focusEvent(event);
     globe.showPopup(event, origin);
     globe.showBubble(event, origin);
-  } else {
-    // Catch-up: feed only — no globe clutter until user clicks the card
-    globe.showPopup(event, origin);
   }
+  // catch-up telegram: feed card only (click to focus on globe)
   charts.addEventMarker(event);
   if (!replay && settings && settings.alarms) fireAlarm(event);
   // Auto-chart: settings flag, or always for darknet victims with a ticker
@@ -421,7 +414,7 @@ async function persistConfig() {
   };
   settings.alarms = $('opt-alarms').checked;
   settings.autoChartCompany = $('opt-autochart').checked;
-  settings.popupMinSec = Number($('popup-min').value) || 6;
+  settings.popupMinSec = Number($('popup-min').value) || 8;
   settings.sources = {
     telegram: $('src-telegram').checked,
     darknet: $('src-darknet').checked,
@@ -452,7 +445,7 @@ function initToggles() {
   $('watch-companies').checked = settings.watch.companies !== false;
   $('opt-alarms').checked = Boolean(settings.alarms);
   $('opt-autochart').checked = Boolean(settings.autoChartCompany);
-  $('popup-min').value = String(settings.popupMinSec || 6);
+  $('popup-min').value = String(settings.popupMinSec || 8);
   syncSourceUi();
 
   for (const id of [
@@ -460,6 +453,13 @@ function initToggles() {
     'src-telegram', 'src-darknet', 'dn-tor', 'dn-poll', 'dn-severity',
   ]) {
     $(id).addEventListener('change', () => persistConfig());
+  }
+
+  if ($('open-decisions')) {
+    $('open-decisions').addEventListener('click', () => window.api.openDecisionsLog());
+  }
+  if ($('open-app-log')) {
+    $('open-app-log').addEventListener('click', () => window.api.openLog());
   }
   $('dn-poll-now').addEventListener('click', async () => {
     $('dn-status').textContent = 'polling…';
@@ -517,7 +517,7 @@ function currentProfileSnapshot() {
     darknet: { ...(settings.darknet || {}) },
     alarms: settings.alarms,
     autoChartCompany: settings.autoChartCompany,
-    popupMinSec: settings.popupMinSec || 6,
+    popupMinSec: settings.popupMinSec || 8,
   };
 }
 
@@ -569,9 +569,9 @@ async function applyProfile(name) {
   $('watch-companies').checked = settings.watch.companies !== false;
   $('opt-alarms').checked = settings.alarms;
   $('opt-autochart').checked = settings.autoChartCompany;
-  $('popup-min').value = String(settings.popupMinSec || 6);
+  $('popup-min').value = String(settings.popupMinSec || 8);
   syncSourceUi();
-  cameraQueue.setIntervalSec(settings.popupMinSec || 6);
+  cameraQueue.setIntervalSec(settings.popupMinSec || 8);
 
   // One settings:set call → main.applyRuntimeSettings (darknet start/stop, watch)
   await window.api.settings.set({
@@ -654,7 +654,7 @@ async function boot() {
   initDock();
   initToggles();
   initProfiles();
-  cameraQueue.setIntervalSec(settings.popupMinSec || 6);
+  cameraQueue.setIntervalSec(settings.popupMinSec || 8);
   await initAuth();
   await replayBacklog();
   // Second pass: the first catch-up sync may still have been in flight

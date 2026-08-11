@@ -133,18 +133,8 @@
         <h2>Looking For</h2>
         <label class="toggle-row"><input type="checkbox" id="watch-places" checked /> Places (GeoNames)</label>
         <label class="toggle-row"><input type="checkbox" id="watch-companies" checked /> Companies &amp; stocks</label>
-        <label class="toggle-row alarm"><input type="checkbox" id="opt-alarms" /> Alarm on every match</label>
+        <label class="toggle-row alarm"><input type="checkbox" id="opt-alarms" /> Alarm sound on every match</label>
         <label class="toggle-row"><input type="checkbox" id="opt-autochart" /> Auto-load matched company chart</label>
-        <div class="row">
-          <label class="mini-label" for="popup-min">Bubble</label>
-          <select id="popup-min" title="Minimum time a place-bubble stays on the globe">
-            <option value="3">min 3s</option>
-            <option value="6" selected>min 6s</option>
-            <option value="10">min 10s</option>
-            <option value="15">min 15s</option>
-            <option value="30">min 30s</option>
-          </select>
-        </div>
       </section>
 
       <!-- Channel selector -->
@@ -184,8 +174,29 @@
         <div id="queue-badge" class="hidden"></div>
       </div>
 
-      <!-- Charts column -->
+      <!-- Charts + display settings column -->
       <div id="charts-col">
+        <section id="display-settings" class="panel">
+          <h2>Display</h2>
+          <div class="row">
+            <label class="mini-label" for="popup-min" title="How long each event stays on the globe before the next one">Wait</label>
+            <select id="popup-min" title="Seconds each Telegram/Darknet event stays before the next">
+              <option value="5">5 seconds</option>
+              <option value="8" selected>8 seconds</option>
+              <option value="12">12 seconds</option>
+              <option value="15">15 seconds</option>
+              <option value="20">20 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="45">45 seconds</option>
+              <option value="60">60 seconds</option>
+            </select>
+          </div>
+          <p class="hint">Applies to Telegram and Darknet alike — camera, arrows, and place-bubbles.</p>
+          <div class="row">
+            <button id="open-decisions" class="mini" title="Open overnight decision log">Decision log</button>
+            <button id="open-app-log" class="mini ghost" title="Open app.log">App log</button>
+          </div>
+        </section>
         <div id="charts-toolbar">
           <input id="ticker-input" type="text" placeholder="Add ticker (e.g. GLD, BTC-USD, ILS=X)" />
           <button id="add-ticker">+</button>
