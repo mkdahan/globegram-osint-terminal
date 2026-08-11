@@ -19,6 +19,7 @@ const keywordFilter = require('./utils/keywordFilter');
 const marketData = require('./financial/marketData');
 const topMovers = require('./financial/topMovers');
 const { DarknetScraper } = require('./darknet/darknetScraper');
+const { extractRoutes } = require('./geocoder/relationExtractor');
 const { ensureDataDirs, MEDIA_DIR } = require('./paths');
 
 let win = null;
@@ -79,6 +80,7 @@ async function processEvent(payload) {
       lat: l.lat,
       lon: l.lon,
       cc: l.cc,
+      pop: l.pop || 0,
       matchedWord: l.matchedWord,
       locativeScore: l.locativeScore || 0,
       locativeHint: l.locativeHint || null,
@@ -105,6 +107,19 @@ async function processEvent(payload) {
     .sort((a, b) => b.locativeScore - a.locativeScore || a._pos - b._pos)
     .map(({ _pos, ...t }) => t);
 
+  // Darknet without a company HQ: drop weak place pins (RSS banners cause
+  // random red dots). Keep only strong locative / large places.
+  let finalTargets = targets;
+  if (isDarknet && !companies.length) {
+    finalTargets = targets.filter(
+      (t) => (t.locativeScore || 0) >= 45 || (t.pop || 0) >= 500_000
+    );
+  }
+
+  // From→to routes (arrows) or undirected links between places/companies
+  const placeLike = finalTargets.filter((t) => t.lat != null && t.lon != null);
+  const { routes, origin } = extractRoutes(searchText || '', placeLike);
+
   const event = {
     ...payload,
     highPriority,
@@ -113,9 +128,12 @@ async function processEvent(payload) {
       : matches,
     locations,
     companies,
-    targets,
+    targets: finalTargets,
+    routes,
+    origin: origin || finalTargets[0] || null,
     mediaPath: null,
     stream: isDarknet ? 'darknet' : 'telegram',
+    popupMinSec: (currentSettings && currentSettings.popupMinSec) || 6,
   };
   recentEvents.push(event);
   if (recentEvents.length > MAX_RECENT_EVENTS) {

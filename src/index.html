@@ -135,6 +135,16 @@
         <label class="toggle-row"><input type="checkbox" id="watch-companies" checked /> Companies &amp; stocks</label>
         <label class="toggle-row alarm"><input type="checkbox" id="opt-alarms" /> Alarm on every match</label>
         <label class="toggle-row"><input type="checkbox" id="opt-autochart" /> Auto-load matched company chart</label>
+        <div class="row">
+          <label class="mini-label" for="popup-min">Bubble</label>
+          <select id="popup-min" title="Minimum time a place-bubble stays on the globe">
+            <option value="3">min 3s</option>
+            <option value="6" selected>min 6s</option>
+            <option value="10">min 10s</option>
+            <option value="15">min 15s</option>
+            <option value="30">min 30s</option>
+          </select>
+        </div>
       </section>
 
       <!-- Channel selector -->
@@ -167,6 +177,8 @@
           <div id="media-popup-body"></div>
           <div id="media-popup-text"></div>
         </div>
+        <!-- WhatsApp-style bubbles anchored to places on the globe -->
+        <div id="globe-bubbles"></div>
         <div id="mode-badge" class="live">● LIVE</div>
         <button id="go-live" class="hidden">GO LIVE</button>
         <div id="queue-badge" class="hidden"></div>

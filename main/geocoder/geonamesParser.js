@@ -45,10 +45,21 @@ const BLOCK_STEMS = new Set([
   'אזור', 'מרכז', 'דרום', 'צפון', 'מזרח', 'מערב', 'עיירה', 'עיר', 'כפר',
   'מפעל', 'מחסן', 'שדה', 'אזורי', 'רחוב', 'שכונה', 'גבעה',
   'פרק', 'הפרק', // "על הפרק" = on the agenda, not Perak (MY)
+  'חדשות', 'דיווח', 'עודכן', 'דקות', 'שעות', 'היום', 'אתמול',
+  'ממשלה', 'צבא', 'כוחות', 'טנקים', 'טנק', 'חיילים',
   'over', 'near', 'area', 'region', 'center', 'centre', 'town', 'city',
   'village', 'facility', 'plant', 'factory', 'warehouse', 'district',
+  'news', 'update', 'today', 'yesterday', 'government', 'army', 'forces',
   'gat', // fragment of "Kiryat Gat"
+  // Demonyms / adjectives that collide with tiny place names
+  'german', 'russian', 'ukrainian', 'american', 'israeli', 'syrian',
+  'french', 'british', 'chinese', 'iranian', 'turkish', 'polish',
+  'italian', 'spanish', 'greek', 'dutch', 'swedish', 'norwegian',
+  'egyptian', 'lebanese', 'jordanian', 'saudi', 'qatari', 'emirati',
 ]);
+
+/** Tiny / ambiguous aliases that need a locative cue or huge population */
+const AMBIGUOUS_MIN_POP = 250_000;
 
 /** Locative strength of an attached proclitic letter */
 const PREFIX_SCORE = {
@@ -130,7 +141,14 @@ class GeonamesParser {
         (cur.names || []).some((n) => norm(n) === norm(e.name)) ||
         (e.names || []).some((n) => norm(n) === norm(cur.name));
       if (same) {
-        cur.names = [...new Set([...(cur.names || []), ...(e.names || []), e.name])];
+        // Seed wins for coords / population / canonical name — bundled
+        // GeoNames rows are sometimes wrong (e.g. Germany pinned in Wisconsin).
+        cur.names = [...new Set([...(cur.names || []), ...(e.names || []), e.name, cur.name])];
+        if (e.lat != null) cur.lat = e.lat;
+        if (e.lon != null) cur.lon = e.lon;
+        if (e.pop != null) cur.pop = e.pop;
+        if (e.cc) cur.cc = e.cc;
+        if (e.name) cur.name = e.name;
       } else {
         byId.set(`seed:${e.name}:${e.id}`, { ...e, names: [...(e.names || [])] });
       }
@@ -255,6 +273,17 @@ class GeonamesParser {
           locativeHint: meta.locativeHint || null,
           _order: meta.order,
         };
+      })
+      // Drop weak / ambiguous matches that cause "red dots jumping" to
+      // random towns (short alias, no locative cue, small population).
+      .filter((r) => {
+        const word = String(r.matchedWord || '');
+        const letters = word.replace(/[^\p{L}]/gu, '');
+        const short = letters.length > 0 && letters.length <= 3;
+        const weak = (r.locativeScore || 0) < 15;
+        if (short && weak && (r.pop || 0) < AMBIGUOUS_MIN_POP) return false;
+        if (weak && (r.pop || 0) < 50_000 && letters.length <= 5) return false;
+        return true;
       })
       .sort(
         (a, b) =>

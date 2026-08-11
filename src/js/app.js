@@ -14,9 +14,12 @@ const $ = (id) => document.getElementById(id);
 const globe = new CesiumManager('cesiumContainer');
 const charts = new ChartManager($('charts-grid'), (unixMs) => sync.onChartClick(unixMs));
 const sync = new TimeSync(globe, charts);
-// Camera only flies — sticky "latest match" card is owned by the event stream
-// so older queued flights never overwrite a newer message.
-const cameraQueue = new CameraQueue(globe, null);
+// Camera flies to origin; on arrive refresh sticky card (bubble is shown by CameraQueue).
+const cameraQueue = new CameraQueue(globe, (event, loc) => {
+  // Only overwrite sticky card if this is still the newest match
+  if (globe.lastEvent && globe.lastEvent.date > event.date) return;
+  globe.showPopup(event, loc || event.origin || (event.targets && event.targets[0]));
+});
 
 // Corporate popup "Load <TICKER> chart" button
 globe.onLoadTicker = (yahoo) => charts.addChart(yahoo);
@@ -27,6 +30,7 @@ let settings = {
   sources: { telegram: true, darknet: false },
   darknet: { enabled: true, pollMinutes: 5, minSeverity: 'MEDIUM', useTor: false },
   ui: { sidebarOpen: true, chartsOpen: true },
+  popupMinSec: 6,
   alarms: false, autoChartCompany: false, profiles: {},
 };
 
@@ -237,11 +241,17 @@ function handleEvent(event, { replay = false, fly = true } = {}) {
   addFeedCard(event);
   const targets = event.targets || [];
   if (!targets.length) return;
-  globe.addEvent(event);
-  // Sticky card updates immediately so the last match never disappears
-  // while the camera queue is still flying / waiting.
-  globe.showPopup(event, targets[0]);
-  if (fly) cameraQueue.push(event);
+  // Stamp min display time so the queue / bubbles honor the setting
+  event.popupMinSec = settings.popupMinSec || event.popupMinSec || 6;
+  globe.addEvent(event); // pins + from→to arrows
+  // Sticky card + WhatsApp bubble from the origin place (first / "from")
+  const origin = event.origin || targets[0];
+  globe.showPopup(event, origin);
+  if (fly) {
+    cameraQueue.push(event); // flies, then bumps bubble from origin
+  } else {
+    globe.showBubble(event, origin);
+  }
   charts.addEventMarker(event);
   if (!replay && settings && settings.alarms) fireAlarm(event);
   // Auto-chart: settings flag, or always for darknet victims with a ticker
@@ -399,6 +409,7 @@ async function persistConfig() {
   };
   settings.alarms = $('opt-alarms').checked;
   settings.autoChartCompany = $('opt-autochart').checked;
+  settings.popupMinSec = Number($('popup-min').value) || 6;
   settings.sources = {
     telegram: $('src-telegram').checked,
     darknet: $('src-darknet').checked,
@@ -411,11 +422,13 @@ async function persistConfig() {
     minSeverity: $('dn-severity').value || 'MEDIUM',
   };
   $('sources-panel').classList.toggle('darknet-on', settings.sources.darknet);
+  cameraQueue.setIntervalSec(settings.popupMinSec);
   // settings:set → main.applyRuntimeSettings — takes effect immediately
   await window.api.settings.set({
     watch: settings.watch,
     alarms: settings.alarms,
     autoChartCompany: settings.autoChartCompany,
+    popupMinSec: settings.popupMinSec,
     sources: settings.sources,
     darknet: settings.darknet,
   });
@@ -427,10 +440,11 @@ function initToggles() {
   $('watch-companies').checked = settings.watch.companies !== false;
   $('opt-alarms').checked = Boolean(settings.alarms);
   $('opt-autochart').checked = Boolean(settings.autoChartCompany);
+  $('popup-min').value = String(settings.popupMinSec || 6);
   syncSourceUi();
 
   for (const id of [
-    'watch-places', 'watch-companies', 'opt-alarms', 'opt-autochart',
+    'watch-places', 'watch-companies', 'opt-alarms', 'opt-autochart', 'popup-min',
     'src-telegram', 'src-darknet', 'dn-tor', 'dn-poll', 'dn-severity',
   ]) {
     $(id).addEventListener('change', () => persistConfig());
@@ -491,6 +505,7 @@ function currentProfileSnapshot() {
     darknet: { ...(settings.darknet || {}) },
     alarms: settings.alarms,
     autoChartCompany: settings.autoChartCompany,
+    popupMinSec: settings.popupMinSec || 6,
   };
 }
 
@@ -536,12 +551,15 @@ async function applyProfile(name) {
   };
   settings.alarms = Boolean(prof.alarms);
   settings.autoChartCompany = Boolean(prof.autoChartCompany);
+  if (prof.popupMinSec) settings.popupMinSec = Number(prof.popupMinSec) || settings.popupMinSec;
 
   $('watch-places').checked = settings.watch.places !== false;
   $('watch-companies').checked = settings.watch.companies !== false;
   $('opt-alarms').checked = settings.alarms;
   $('opt-autochart').checked = settings.autoChartCompany;
+  $('popup-min').value = String(settings.popupMinSec || 6);
   syncSourceUi();
+  cameraQueue.setIntervalSec(settings.popupMinSec || 6);
 
   // One settings:set call → main.applyRuntimeSettings (darknet start/stop, watch)
   await window.api.settings.set({
@@ -552,6 +570,7 @@ async function applyProfile(name) {
     darknet: settings.darknet,
     alarms: settings.alarms,
     autoChartCompany: settings.autoChartCompany,
+    popupMinSec: settings.popupMinSec,
   });
   refreshDarknetStatus();
 }
@@ -623,6 +642,7 @@ async function boot() {
   initDock();
   initToggles();
   initProfiles();
+  cameraQueue.setIntervalSec(settings.popupMinSec || 6);
   await initAuth();
   await replayBacklog();
   // Second pass: the first catch-up sync may still have been in flight

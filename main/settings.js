@@ -33,6 +33,8 @@ const DEFAULTS = {
   autoChartCompany: false,
   // UI panel visibility
   ui: { sidebarOpen: true, chartsOpen: true },
+  // Minimum seconds a place-bubble / message stays visible on the globe
+  popupMinSec: 6,
   // named monitoring profiles
   profiles: {},
 };
