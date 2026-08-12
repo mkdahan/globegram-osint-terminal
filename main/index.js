@@ -5,6 +5,7 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 
 require('./logger').install(); // before anything that logs (GramJS included)
@@ -341,13 +342,25 @@ function registerIpc() {
 
 /* ---------------- window ---------------- */
 
+function resolveAppIcon() {
+  // Prefer .ico on Windows (taskbar), PNG elsewhere / as fallback
+  const ico = path.join(__dirname, '..', 'assets', 'icon.ico');
+  const png = path.join(__dirname, '..', 'assets', 'icon.png');
+  if (process.platform === 'win32' && fs.existsSync(ico)) return ico;
+  if (fs.existsSync(png)) return png;
+  if (fs.existsSync(ico)) return ico;
+  return undefined;
+}
+
 function createWindow() {
+  const icon = resolveAppIcon();
   win = new BrowserWindow({
     width: 1720,
     height: 1000,
     backgroundColor: '#0b0e14',
     title: 'GlobeGram OSINT Terminal',
     autoHideMenuBar: true,
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -411,6 +424,10 @@ function startDemoFeed() {
 }
 
 app.whenReady().then(() => {
+  // Windows taskbar grouping / pin identity
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.globegram.osint-terminal');
+  }
   ensureDataDirs();
   geocoder.load();
   companyParser.load();

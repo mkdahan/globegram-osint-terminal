@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Real-Time Geo-Financial Intelligence Terminal — Telegram OSINT + 3D globe + synchronized market charts",
   "main": "main/index.js",
+  "productName": "GlobeGram OSINT Terminal",
+  "build": {
+    "appId": "com.globegram.osint-terminal",
+    "productName": "GlobeGram OSINT Terminal",
+    "directories": { "buildResources": "assets" },
+    "win": { "icon": "assets/icon.ico" },
+    "linux": { "icon": "assets/icon.png" },
+    "mac": { "icon": "assets/icon.png" }
+  },
   "scripts": {
     "start": "electron .",
     "build-gazetteer": "node scripts/downloadGeonames.js",
