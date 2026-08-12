@@ -30,6 +30,33 @@ const GENERIC = new Set([
   'בע"מ', 'בעמ', 'חברה', 'קבוצת', 'بنك', 'شركة', 'مجموعة',
 ]);
 
+// English / common stopwords that Wikidata sometimes maps to dead tickers
+// (WE, WITH, AT, ONE, MAJOR, 2024…) — never index as unigram company aliases.
+const STOPWORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'if', 'of', 'to', 'in', 'on', 'at',
+  'by', 'for', 'from', 'with', 'without', 'as', 'is', 'are', 'was', 'were',
+  'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+  'would', 'could', 'should', 'may', 'might', 'must', 'can', 'we', 'you',
+  'they', 'he', 'she', 'it', 'our', 'your', 'their', 'this', 'that', 'these',
+  'those', 'not', 'no', 'yes', 'all', 'any', 'some', 'one', 'two', 'major',
+  'minor', 'new', 'old', 'next', 'last', 'first', 'second', 'third', 'best',
+  'news', 'report', 'reports', 'said', 'says', 'today', 'yesterday', 'week',
+  'month', 'year', 'years', 'day', 'days', 'via', 'per', 'vs', 'etc',
+  'base', 'unit', 'units', 'flight', 'flights', 'force', 'forces', 'army',
+  'naval', 'air', 'sea', 'land', 'tel', 'aviv', 'el', 'al', 'de', 'la', 'le',
+  'des', 'du', 'van', 'von', 'der', 'und', 'mit',
+]);
+
+function yahooQuality(y) {
+  if (!y) return 0;
+  const s = String(y).trim();
+  if (!s) return 0;
+  // Exchange-qualified (ELAL.TA, 2222.SR) beats bare ticker (ELAL)
+  if (/[.=]/.test(s)) return 3;
+  if (/^[A-Z]{1,5}$/i.test(s)) return 2;
+  return 1;
+}
+
 class CompanyParser {
   constructor() {
     this.companies = [];
@@ -80,8 +107,13 @@ class CompanyParser {
       } else {
         const cur = byKey.get(k);
         cur.aliases = [...new Set([...(cur.aliases || []), ...(c.aliases || []), c.name, c.ticker].filter(Boolean))];
-        if (!cur.yahoo && c.yahoo) cur.yahoo = c.yahoo;
+        // Prefer curated seed Yahoo ids (ELAL.TA) over bare Wikidata tickers (ELAL)
+        if (c.yahoo && yahooQuality(c.yahoo) >= yahooQuality(cur.yahoo)) {
+          cur.yahoo = c.yahoo;
+          if (c.ticker) cur.ticker = c.ticker;
+        }
         if (!cur.ticker && c.ticker) cur.ticker = c.ticker;
+        if (c.exchange) cur.exchange = c.exchange;
         if (!cur.lat && c.lat) { cur.lat = c.lat; cur.lon = c.lon; }
       }
     }
@@ -102,7 +134,10 @@ class CompanyParser {
         const key = normalize(a);
         // short keys allowed only for explicit all-caps tickers/acronyms (BP, GD, IAI)
         const isAcronym = /^[A-Z0-9.\-]{2,5}$/.test(a.trim());
-        if (!key || GENERIC.has(key)) continue;
+        if (!key || GENERIC.has(key) || STOPWORDS.has(key)) continue;
+        // Pure years / numeric codes ("2024", "8200") match news too eagerly and
+        // often resolve to dead Yahoo ids (8200.SW). Never index as unigrams.
+        if (/^\d{2,5}$/.test(key)) continue;
         if (key.length < 3 && !isAcronym) continue;
         if (!this.nameIndex.has(key)) this.nameIndex.set(key, idx);
       }
@@ -120,14 +155,23 @@ class CompanyParser {
 
     const norm = normalize(text);
     const tokens = norm.match(TOKEN_RE) || [];
+    const consumed = new Array(tokens.length).fill(false);
     let order = 0;
     for (let i = 0; i < tokens.length; i++) {
+      if (consumed[i]) continue;
       for (let n = MAX_NGRAM; n >= 1; n--) {
         if (i + n > tokens.length) continue;
+        let overlap = false;
+        for (let k = 0; k < n; k++) if (consumed[i + k]) { overlap = true; break; }
+        if (overlap) continue;
         const phrase = tokens.slice(i, i + n).join(' ');
+        // Unigram stopwords / tiny tokens never match companies
+        if (n === 1 && (STOPWORDS.has(phrase) || GENERIC.has(phrase))) continue;
         const idx = this._lookup(phrase, n === 1);
         if (idx !== undefined && !found.has(idx)) {
           found.set(idx, { matchedWord: phrase, order: order++ });
+          for (let k = 0; k < n; k++) consumed[i + k] = true;
+          break;
         }
       }
     }
@@ -145,11 +189,14 @@ class CompanyParser {
       .slice(0, MAX_MATCHES)
       .map(([idx, { matchedWord }]) => {
         const c = this.companies[idx];
+        let yahoo = c.yahoo || null;
+        // Drop junk Yahoo ids that only create delisted chart spam
+        if (yahoo && !isPlausibleYahoo(yahoo)) yahoo = null;
         return {
           type: 'COMPANY_MATCH',
           companyName: c.name,
           ticker: c.ticker || null,
-          yahoo: c.yahoo || null,
+          yahoo,
           exchange: c.exchange || null,
           country: c.country,
           countryCode: c.cc,
@@ -197,4 +244,20 @@ class CompanyParser {
   }
 }
 
-module.exports = { CompanyParser };
+/**
+ * Accept exchange-qualified ids, US-style tickers (1–5 letters), crypto/FX,
+ * and reject stopwords / bare years that poisoned overnight chart refresh.
+ */
+function isPlausibleYahoo(symbol) {
+  if (!symbol) return false;
+  const s = String(symbol).trim().toUpperCase();
+  if (!s || s.length > 24) return false;
+  if (STOPWORDS.has(s.toLowerCase()) || GENERIC.has(s.toLowerCase())) return false;
+  if (/^\d{4}$/.test(s)) return false; // year
+  if (/^[A-Z]{1,5}$/.test(s)) return true; // US listing
+  if (/^[A-Z0-9][A-Z0-9.\-]{0,14}(\.[A-Z]{1,3}|-[A-Z]{1,5}|=[A-Z])$/i.test(s)) return true;
+  if (/^[A-Z]{2,5}-USD$/i.test(s)) return true;
+  return /[.=]/.test(s);
+}
+
+module.exports = { CompanyParser, isPlausibleYahoo, STOPWORDS };

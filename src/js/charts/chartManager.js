@@ -56,6 +56,9 @@ export class ChartManager {
   async addChart(symbol) {
     symbol = symbol.trim().toUpperCase();
     if (!symbol || this.charts.has(symbol)) return;
+    // Reject obvious junk tickers before they enter the live refresh loop
+    if (!/^[A-Z0-9][A-Z0-9.\-=]{0,22}$/.test(symbol)) return;
+    if (/^(WE|WITH|AT|ONE|MAJOR|FOR|ARE|THE|AND|2024|2025)$/i.test(symbol)) return;
 
     const cell = document.createElement('div');
     cell.className = 'chart-cell';
@@ -74,7 +77,7 @@ export class ChartManager {
     const chart = LightweightCharts.createChart(body, CHART_OPTS);
     const series = chart.addCandlestickSeries(SERIES_OPTS);
 
-    const rec = { chart, series, cell, candles: [], symbol };
+    const rec = { chart, series, cell, candles: [], symbol, failCount: 0, dead: false };
     this.charts.set(symbol, rec);
 
     cell.querySelector('.close-chart').addEventListener('click', () => this.removeChart(symbol));
@@ -107,6 +110,8 @@ export class ChartManager {
     const errEl = rec.cell.querySelector('.chart-err');
     if (errEl) errEl.remove();
     if (!res.ok || !res.candles.length) {
+      rec.failCount = (rec.failCount || 0) + 1;
+      if (rec.failCount >= 2) rec.dead = true;
       const d = document.createElement('div');
       d.className = 'chart-err';
       d.textContent = res.error || 'no data for this date';
@@ -115,6 +120,8 @@ export class ChartManager {
       rec.series.setData([]);
       return;
     }
+    rec.failCount = 0;
+    rec.dead = false;
     rec.candles = res.candles;
     rec.series.setData(res.candles);
     rec.series.setMarkers(this._markersFor());
@@ -137,8 +144,22 @@ export class ChartManager {
   async refreshLive() {
     if (this.currentDateMs !== null) return; // scrubbed to history — don't touch
     for (const rec of this.charts.values()) {
+      if (rec.dead) continue; // stop hammering delisted / junk symbols
       const res = await window.api.market.candles(rec.symbol, null, '1m');
-      if (!res.ok || !res.candles.length) continue;
+      if (!res.ok || !res.candles.length) {
+        rec.failCount = (rec.failCount || 0) + 1;
+        if (rec.failCount >= 3) {
+          rec.dead = true;
+          if (!rec.cell.querySelector('.chart-err')) {
+            const d = document.createElement('div');
+            d.className = 'chart-err';
+            d.textContent = 'no data — paused refresh';
+            rec.cell.querySelector('.chart-body').appendChild(d);
+          }
+        }
+        continue;
+      }
+      rec.failCount = 0;
       // Cheap + safe: replace data (1 day of 1m bars is small)
       rec.candles = res.candles;
       rec.series.setData(res.candles);
@@ -149,6 +170,9 @@ export class ChartManager {
 
   /** Scrub to a specific historical day (or null to return to today/live). */
   async loadDate(dateMs) {
+    const now = Date.now();
+    // Future globe clock → clamp to today so Yahoo never sees start > end
+    if (dateMs != null && dateMs > now) dateMs = now;
     const sameDay =
       (dateMs === null && this.currentDateMs === null) ||
       (dateMs !== null && this.currentDateMs !== null &&
@@ -156,6 +180,8 @@ export class ChartManager {
     this.currentDateMs = dateMs;
     if (sameDay) return;
     for (const rec of this.charts.values()) {
+      rec.dead = false;
+      rec.failCount = 0;
       await this._loadData(rec);
     }
   }

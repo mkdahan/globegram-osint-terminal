@@ -256,9 +256,19 @@ function handleEvent(event, { replay = false, fly = true } = {}) {
   // Auto-chart: settings flag, or always for darknet victims with a ticker
   const isDarknet = event.stream === 'darknet';
   if ((settings && settings.autoChartCompany) || isDarknet) {
-    const co = targets.find((t) => t.kind === 'company' && t.yahoo);
+    const co = targets.find((t) => t.kind === 'company' && t.yahoo && isSafeYahoo(t.yahoo));
     if (co && (settings.autoChartCompany || isDarknet)) charts.addChart(co.yahoo);
   }
+}
+
+/** Guard against Wikidata false positives (WE/WITH/AT/2024) and bare TASE tickers. */
+function isSafeYahoo(sym) {
+  if (!sym) return false;
+  const s = String(sym).trim().toUpperCase();
+  if (!s || s.length > 24) return false;
+  if (/^(WE|WITH|AT|ONE|MAJOR|FOR|ARE|THE|AND|OR|TO|IN|ON|BY|OF|A|AN)$/.test(s)) return false;
+  if (/^\d{4}$/.test(s)) return false;
+  return /^[A-Z0-9][A-Z0-9.\-=]{0,22}$/.test(s);
 }
 
 /**

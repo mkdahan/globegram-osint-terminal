@@ -17,10 +17,16 @@ async function yf() {
 }
 
 let _cache = { at: 0, data: [] };
+let _backoffUntil = 0;
+let _failStreak = 0;
 const CACHE_MS = 30 * 1000;
+const MAX_BACKOFF_MS = 15 * 60 * 1000;
 
 async function getTopMovers(count = 25) {
-  if (Date.now() - _cache.at < CACHE_MS && _cache.data.length) return _cache.data;
+  const now = Date.now();
+  if (now - _cache.at < CACHE_MS && _cache.data.length) return _cache.data;
+  if (now < _backoffUntil) return _cache.data; // stale better than hammering
+
   const api = await yf();
   let quotes = [];
   try {
@@ -29,16 +35,22 @@ async function getTopMovers(count = 25) {
       { validateResult: false }
     );
     quotes = (res && res.quotes) || [];
+    _failStreak = 0;
+    _backoffUntil = 0;
   } catch (err) {
-    // Older API name, kept as fallback
-    try {
-      const res = await api.dailyGainers({ count }, { validateResult: false });
-      quotes = (res && res.quotes) || [];
-    } catch (err2) {
-      console.error('[topMovers] screener failed:', err.message, '|', err2.message);
-      return _cache.data; // stale is better than nothing
+    _failStreak++;
+    const wait = Math.min(MAX_BACKOFF_MS, 30_000 * (2 ** Math.min(_failStreak - 1, 4)));
+    _backoffUntil = Date.now() + wait;
+    // Log once per backoff window — never call deprecated dailyGainers
+    if (_failStreak <= 2 || _failStreak % 10 === 0) {
+      console.warn(
+        `[topMovers] screener failed (streak=${_failStreak}, backoff ${Math.round(wait / 1000)}s):`,
+        err.message
+      );
     }
+    return _cache.data;
   }
+
   const data = quotes
     .map((q) => ({
       symbol: q.symbol,

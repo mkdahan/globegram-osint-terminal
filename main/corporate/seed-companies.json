@@ -77,6 +77,13 @@
     { "id": 73, "name": "Kintex", "ticker": null, "yahoo": null, "exchange": null, "country": "Bulgaria", "cc": "BG", "lat": 42.6977, "lon": 23.3219, "aliases": ["Kintex", "Кинтекс"] },
     { "id": 74, "name": "UkrOboronProm", "ticker": null, "yahoo": null, "exchange": null, "country": "Ukraine", "cc": "UA", "lat": 50.4501, "lon": 30.5234, "aliases": ["Ukroboronprom", "UkrOboronProm", "אוקרובורונפרום", "Укроборонпром"] },
     { "id": 75, "name": "Antonov", "ticker": null, "yahoo": null, "exchange": null, "country": "Ukraine", "cc": "UA", "lat": 50.4501, "lon": 30.5234, "aliases": ["Antonov", "אנטנוב", "Антонов"] },
-    { "id": 76, "name": "Wildberries", "ticker": null, "yahoo": null, "exchange": null, "country": "Russia", "cc": "RU", "lat": 55.7558, "lon": 37.6173, "aliases": ["Wildberries", "וילדבריז", "ווילדבריז", "וילדבריס", "Вайлдберриз"] }
+    { "id": 76, "name": "Wildberries", "ticker": null, "yahoo": null, "exchange": null, "country": "Russia", "cc": "RU", "lat": 55.7558, "lon": 37.6173, "aliases": ["Wildberries", "וילדבריז", "ווילדבריז", "וילדבריס", "Вайлдберриз"] },
+    { "id": 77, "name": "Bezeq", "ticker": "BEZQ", "yahoo": "BEZQ.TA", "exchange": "TASE", "country": "Israel", "cc": "IL", "lat": 32.0853, "lon": 34.7818, "aliases": ["Bezeq", "בזק"] },
+    { "id": 78, "name": "First International Bank of Israel", "ticker": "FIBI", "yahoo": "FIBI.TA", "exchange": "TASE", "country": "Israel", "cc": "IL", "lat": 32.0853, "lon": 34.7818, "aliases": ["FIBI", "הבינלאומי", "בנק הבינלאומי"] },
+    { "id": 79, "name": "Bank of Jerusalem", "ticker": "JBNK", "yahoo": "JBNK.TA", "exchange": "TASE", "country": "Israel", "cc": "IL", "lat": 31.7683, "lon": 35.2137, "aliases": ["JBNK", "בנק ירושלים"] },
+    { "id": 80, "name": "Ashtrom Group", "ticker": "ASHO", "yahoo": "ASHO.TA", "exchange": "TASE", "country": "Israel", "cc": "IL", "lat": 32.0853, "lon": 34.7818, "aliases": ["Ashtrom", "אשטרום"] },
+    { "id": 81, "name": "Areivim", "ticker": "ARSP", "yahoo": "ARSP.TA", "exchange": "TASE", "country": "Israel", "cc": "IL", "lat": 32.0853, "lon": 34.7818, "aliases": ["ARSP"] },
+    { "id": 82, "name": "Cellcom Israel", "ticker": "CEL", "yahoo": "CEL.TA", "exchange": "TASE", "country": "Israel", "cc": "IL", "lat": 32.0853, "lon": 34.7818, "aliases": ["Cellcom", "סלקום"] },
+    { "id": 83, "name": "Hamat Group", "ticker": "HAMAT", "yahoo": "HAMAT.TA", "exchange": "TASE", "country": "Israel", "cc": "IL", "lat": 32.0853, "lon": 34.7818, "aliases": ["Hamat", "חמת"] }
   ]
 }

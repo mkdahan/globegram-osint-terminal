@@ -19,6 +19,7 @@ const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
 const POLL_MS = 8_000;
 const CHATS_PER_ROUND = 4;
 const FIRST_RUN_BACKLOG = 10; // messages to show for a chat we never synced
+const FLOOD_PAD_MS = 2_000; // extra pad after Telegram's flood wait expires
 
 /** Canonical string form (no BigInt "n" suffix, trimmed). */
 function canonId(id) {
@@ -64,7 +65,18 @@ class ChatManager {
     this._pollTimer = null;
     this._polling = false;
     this._pollCursor = 0;
-    this.stats = { received: 0, emitted: 0, skippedUnmonitored: 0, lastText: '', lastChat: '', lastAt: 0, lastPollAt: 0 };
+    this._floodPauseUntil = 0;
+    this.stats = {
+      received: 0,
+      emitted: 0,
+      emittedLive: 0,
+      emittedSync: 0,
+      skippedUnmonitored: 0,
+      lastText: '',
+      lastChat: '',
+      lastAt: 0,
+      lastPollAt: 0,
+    };
     this._loadSyncState();
   }
 
@@ -185,6 +197,7 @@ class ChatManager {
 
   async pollMonitored() {
     if (this._polling) return; // don't overlap slow rounds
+    if (Date.now() < this._floodPauseUntil) return; // global FLOOD_WAIT cool-down
     const client = this.tg.client;
     if (!client || !(await this.tg.isAuthorized())) return;
     if (!this._monitoredPrimary.length) return;
@@ -201,6 +214,7 @@ class ChatManager {
       this._pollCursor = (this._pollCursor + batch.length) % Math.max(all.length, 1);
 
       for (const chatId of batch) {
+        if (Date.now() < this._floodPauseUntil) break;
         try {
           const minId = this._lastMsgId.get(chatId) || 0;
           // Server-side filter: everything strictly after our watermark.
@@ -222,12 +236,26 @@ class ChatManager {
             dirty = true;
           }
         } catch (err) {
+          const msg = err && err.message ? err.message : String(err);
+          // Pause ALL GetHistory polling when Telegram rate-limits us —
+          // rotating into more waits just extends the blackout.
+          const flood = msg.match(/flood wait.*?(\d+)/i) || msg.match(/wait of (\d+)/i);
+          const seconds = err && (err.seconds || err.waitSeconds);
+          const waitSec = Number(seconds) || (flood ? Number(flood[1]) : 0);
+          if (waitSec > 0 || /FLOOD/i.test(msg)) {
+            const pause = Math.max(waitSec * 1000, 15_000) + FLOOD_PAD_MS;
+            this._floodPauseUntil = Date.now() + pause;
+            console.warn(
+              `[chatManager] FLOOD_WAIT — pausing all sync for ${Math.round(pause / 1000)}s`
+            );
+            break;
+          }
           // Log first error per chat, then throttle — a broken chat otherwise
           // floods the log every round.
           const n = (this._syncErrCount = this._syncErrCount || new Map()).get(chatId) || 0;
           this._syncErrCount.set(chatId, n + 1);
           if (n === 0 || (n + 1) % 20 === 0) {
-            console.warn(`[chatManager] sync ${chatId} (error #${n + 1}):`, err.message);
+            console.warn(`[chatManager] sync ${chatId} (error #${n + 1}):`, msg);
           }
         }
       }
@@ -308,14 +336,17 @@ class ChatManager {
     };
 
     this.stats.emitted++;
+    if (source === 'live') this.stats.emittedLive++;
+    else this.stats.emittedSync++;
     this.stats.lastText = text.slice(0, 120);
     this.stats.lastChat = payload.chatTitle;
     this.stats.lastAt = Date.now();
 
     if (this.stats.emitted <= 20 || this.stats.emitted % 25 === 0) {
       console.log(
-        `[chatManager] emit #${this.stats.emitted} [${source}] ${payload.chatTitle}: ` +
-        `${(text || '(media)').slice(0, 80)}`
+        `[chatManager] emit #${this.stats.emitted} [${source}] ` +
+        `(live=${this.stats.emittedLive} sync=${this.stats.emittedSync}) ` +
+        `${payload.chatTitle}: ${(text || '(media)').slice(0, 80)}`
       );
     }
 

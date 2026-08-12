@@ -69,8 +69,22 @@ class DarknetScraper {
     if (this.cfg.torProxy && this.cfg.torProxy !== prev.torProxy) {
       this.tor = createTorClient(this.cfg.torProxy);
     }
-    if (this.cfg.enabled) this.start();
-    else this.stop();
+    const wantOn = !!this.cfg.enabled;
+    const wasOn = !!this._timer;
+    const intervalChanged =
+      Number(prev.pollMinutes) !== Number(this.cfg.pollMinutes) ||
+      !!prev.useTor !== !!this.cfg.useTor;
+    // Idempotent: settings:set fires often (tickers, UI) — don't flap stop/start.
+    if (!wantOn) {
+      this.stop();
+      return;
+    }
+    if (wasOn && intervalChanged) {
+      this.stop();
+      this.start();
+      return;
+    }
+    if (!wasOn) this.start();
   }
 
   start() {
@@ -91,7 +105,8 @@ class DarknetScraper {
   }
 
   stop() {
-    if (this._timer) clearInterval(this._timer);
+    if (!this._timer) return; // already stopped — silence spam from settings:set
+    clearInterval(this._timer);
     this._timer = null;
     console.log('[darknet] stopped');
   }
