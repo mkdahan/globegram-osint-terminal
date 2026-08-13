@@ -4,7 +4,7 @@ rem  GlobeGram OSINT Terminal launcher
 rem  Usage:  run.bat          (normal start)
 rem          run.bat demo     (synthetic demo feed, no Telegram)
 rem ============================================================
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
 
 where node >nul 2>nul
@@ -14,15 +14,77 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem Auto-update: grab the latest version from GitHub (skipped quietly if offline)
 where git >nul 2>nul
-if not errorlevel 1 (
-    if exist ".git" (
-        echo [update] Checking GitHub for updates...
-        git pull --ff-only origin master
-        if errorlevel 1 echo [update] Could not auto-update - starting with current version.
-    )
+if errorlevel 1 goto :after_update
+if not exist ".git" goto :after_update
+goto :do_update
+
+rem Compare local files vs GitHub master and pull only when remote is newer.
+:do_update
+echo [update] Checking GitHub for a newer version...
+git fetch origin master
+if errorlevel 1 (
+    echo [update] Offline or GitHub unreachable — starting with current files.
+    goto :after_update
 )
+
+git diff --quiet --ignore-submodules HEAD
+if errorlevel 1 (
+    echo [update] Local files have uncommitted changes — skipping auto-update.
+    goto :after_update
+)
+git diff --quiet --ignore-submodules --cached
+if errorlevel 1 (
+    echo [update] Local files have staged changes — skipping auto-update.
+    goto :after_update
+)
+
+for /f "delims=" %%i in ('git rev-parse HEAD') do set LOCAL_SHA=%%i
+for /f "delims=" %%i in ('git rev-parse origin/master') do set REMOTE_SHA=%%i
+for /f "delims=" %%i in ('git rev-parse --abbrev-ref HEAD') do set CUR_BRANCH=%%i
+for /f "delims=" %%i in ('git rev-parse --short HEAD') do set LOCAL_SHORT=%%i
+for /f "delims=" %%i in ('git rev-parse --short origin/master') do set REMOTE_SHORT=%%i
+
+if "%LOCAL_SHA%"=="%REMOTE_SHA%" (
+    echo [update] Already up to date [%LOCAL_SHORT%].
+    goto :after_update
+)
+
+rem GitHub master is an ancestor of HEAD → local is the same or newer
+git merge-base --is-ancestor origin/master HEAD
+if not errorlevel 1 (
+    echo [update] Local files are newer than GitHub [%LOCAL_SHORT% vs %REMOTE_SHORT%] — keeping local.
+    goto :after_update
+)
+
+rem HEAD is an ancestor of GitHub master → remote is strictly newer, safe fast-forward
+git merge-base --is-ancestor HEAD origin/master
+if errorlevel 1 (
+    echo [update] Local and GitHub have diverged — skipping auto-update to avoid overwriting.
+    echo [update] To update manually: git checkout master ^&^& git pull --ff-only origin master
+    goto :after_update
+)
+
+for /f "delims=" %%i in ('git rev-list --count HEAD..origin/master') do set BEHIND=%%i
+if /i not "%CUR_BRANCH%"=="master" (
+    echo [update] GitHub is newer by %BEHIND% commits [%REMOTE_SHORT%]. Switching to master...
+    git checkout master
+    if errorlevel 1 (
+        echo [update] Could not switch to master — starting with current files.
+        goto :after_update
+    )
+) else (
+    echo [update] GitHub is newer by %BEHIND% commits [%REMOTE_SHORT%] — updating local files...
+)
+
+git pull --ff-only origin master
+if errorlevel 1 (
+    echo [update] Could not auto-update — starting with current version.
+) else (
+    echo [update] Local files are now up to date.
+)
+
+:after_update
 
 if not exist "node_modules\electron\dist\electron.exe" goto :npm_install
 if not exist "node_modules\axios\" goto :npm_install
