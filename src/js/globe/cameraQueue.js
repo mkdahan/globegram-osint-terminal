@@ -34,6 +34,12 @@ export class CameraQueue {
   push(event) {
     if (!event.targets || !event.targets.length) return;
     this.queue.push(event);
+    // Live floods used to grow an hour-long queue so the globe looked stuck
+    // on old news. Keep the newest events; drop the oldest overflow.
+    const MAX_QUEUE = 12;
+    if (this.queue.length > MAX_QUEUE) {
+      this.queue.splice(0, this.queue.length - MAX_QUEUE);
+    }
     this._updateBadge();
   }
 

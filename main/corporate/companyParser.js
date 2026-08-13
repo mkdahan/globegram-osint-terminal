@@ -45,6 +45,8 @@ const STOPWORDS = new Set([
   'base', 'unit', 'units', 'flight', 'flights', 'force', 'forces', 'army',
   'naval', 'air', 'sea', 'land', 'tel', 'aviv', 'el', 'al', 'de', 'la', 'le',
   'des', 'du', 'van', 'von', 'der', 'und', 'mit',
+  'kind', 'fuel', 'ceo', 'plan', 'work', 'apr', 'see', 'thai', 'elec',
+  'just', 'card', 'zoom', 'progress', 'bar', 'sp', 'one', 'major',
 ]);
 
 function yahooQuality(y) {

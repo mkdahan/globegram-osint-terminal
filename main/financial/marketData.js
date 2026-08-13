@@ -29,6 +29,18 @@ function _symKey(symbol) {
   return String(symbol || '').trim().toUpperCase();
 }
 
+/** Bare TASE tickers in saved settings still request ELAL instead of ELAL.TA. */
+const TASE_YAHOO = {
+  ELAL: 'ELAL.TA', POLI: 'POLI.TA', BEZQ: 'BEZQ.TA', LUMI: 'LUMI.TA',
+  ASHO: 'ASHO.TA', HAMAT: 'HAMAT.TA', FIBI: 'FIBI.TA', JBNK: 'JBNK.TA',
+  CEL: 'CEL.TA', ARSP: 'ARSP.TA', ORL: 'ORL.TA', TEVA: 'TEVA',
+};
+
+function resolveYahoo(symbol) {
+  const k = _symKey(symbol);
+  return TASE_YAHOO[k] || k;
+}
+
 function isBlocked(symbol) {
   const k = _symKey(symbol);
   const hit = _negCache.get(k);
@@ -68,7 +80,7 @@ function clearNegativeCache(symbol) {
  * @returns [{time, open, high, low, close, volume}] time = unix seconds
  */
 async function getCandles(symbol, opts = {}) {
-  const k = _symKey(symbol);
+  const k = resolveYahoo(symbol);
   if (!k) return [];
   if (isBlocked(k)) return [];
 
@@ -146,7 +158,7 @@ async function getCandles(symbol, opts = {}) {
 
 /** Lightweight quote for tape / validation. */
 async function getQuote(symbol) {
-  const k = _symKey(symbol);
+  const k = resolveYahoo(symbol);
   if (!k || isBlocked(k)) return null;
   const api = await yf();
   try {

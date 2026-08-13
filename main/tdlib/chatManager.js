@@ -18,7 +18,7 @@ const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
 // Live NewMessage updates stay instant; the sync loop is the safety net.
 const POLL_MS = 8_000;
 const CHATS_PER_ROUND = 4;
-const FIRST_RUN_BACKLOG = 10; // messages to show for a chat we never synced
+const FIRST_RUN_BACKLOG = 8; // messages to show for a chat we never synced
 const FLOOD_PAD_MS = 2_000; // extra pad after Telegram's flood wait expires
 
 /** Canonical string form (no BigInt "n" suffix, trimmed). */
@@ -219,8 +219,10 @@ class ChatManager {
           const minId = this._lastMsgId.get(chatId) || 0;
           // Server-side filter: everything strictly after our watermark.
           // First-ever sync of a chat: just the recent backlog.
+          // Cap per round so a 24-chat catch-up cannot dump 200×N messages
+          // and saturate Telegram media DCs.
           const opts = minId > 0
-            ? { minId, limit: 200 }
+            ? { minId, limit: 40 }
             : { limit: FIRST_RUN_BACKLOG };
           const msgs = await this._fetchMessages(chatId, opts);
           if (!msgs || !msgs.length) continue;
@@ -266,6 +268,16 @@ class ChatManager {
     }
   }
 
+  _markSeen(chatId, msgId) {
+    if (!msgId) return;
+    for (const a of chatIdAliases(chatId)) {
+      this._seen.add(`${a}:${msgId}`);
+    }
+    if (this._seen.size > 5000) {
+      this._seen = new Set([...this._seen].slice(-2000));
+    }
+  }
+
   _resolveChatId(msg) {
     if (!msg) return '';
     if (msg.chatId != null) return canonId(msg.chatId);
@@ -305,13 +317,7 @@ class ChatManager {
     const primaryKey = `${[...chatIdAliases(chatId)][0]}:${msg.id}`;
     const dedupeKeys = [...chatIdAliases(chatId)].map((a) => `${a}:${msg.id}`);
     if (dedupeKeys.some((k) => this._seen.has(k))) return;
-    for (const k of dedupeKeys) {
-      this._seen.add(k);
-      if (this._seen.size > 5000) {
-        // drop oldest-ish: reset when huge
-        this._seen = new Set([...this._seen].slice(-2000));
-      }
-    }
+    this._markSeen(chatId, msg.id);
 
     // Advance sync watermark for this chat (persist so restarts don't re-emit)
     for (const id of this._monitoredPrimary) {

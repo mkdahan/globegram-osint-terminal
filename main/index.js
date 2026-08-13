@@ -199,7 +199,14 @@ async function processEvent(payload) {
   send('tg:event', event);
 
   if (highPriority && payload.media && ['photo', 'video'].includes(payload.media.kind)) {
-    downloadAndNotify(payload.chatId, payload.msgId, payload.key);
+    const ageMs = Date.now() - Number(payload.date || 0);
+    const isCatchup = payload.source === 'sync' && ageMs > 3 * 60 * 1000;
+    if (isCatchup) {
+      // Catch-up photos/videos were saturating Telegram DCs (50+ parallel
+      // downloads) and stalling live updates for minutes.
+    } else {
+      enqueueMediaDownload(payload.chatId, payload.msgId, payload.key);
+    }
   }
 }
 
@@ -220,12 +227,37 @@ function applyRuntimeSettings(cfg) {
   });
 }
 
+const MEDIA_CONCURRENCY = 1;
+const MEDIA_QUEUE_MAX = 8;
+const mediaQueue = [];
+let mediaActive = 0;
+
+function enqueueMediaDownload(chatId, msgId, key) {
+  if (mediaQueue.some((j) => j.key === key)) return;
+  mediaQueue.push({ chatId, msgId, key });
+  while (mediaQueue.length > MEDIA_QUEUE_MAX) mediaQueue.shift();
+  pumpMediaQueue();
+}
+
+async function pumpMediaQueue() {
+  if (mediaActive >= MEDIA_CONCURRENCY) return;
+  const job = mediaQueue.shift();
+  if (!job) return;
+  mediaActive++;
+  try {
+    await downloadAndNotify(job.chatId, job.msgId, job.key);
+  } finally {
+    mediaActive--;
+    pumpMediaQueue();
+  }
+}
+
 async function downloadAndNotify(chatId, msgId, key) {
   try {
     const filePath = await chats.downloadMedia(chatId, msgId);
     if (filePath) send('tg:media', { key, path: filePath });
   } catch (err) {
-    console.error('[media]', err.message);
+    console.warn('[media]', err.message);
     send('tg:media', { key, error: err.message });
   }
 }
@@ -271,7 +303,7 @@ function registerIpc() {
     return true;
   });
   ipcMain.handle('tg:downloadMedia', async (e, { chatId, msgId, key }) => {
-    downloadAndNotify(chatId, msgId, key);
+    enqueueMediaDownload(chatId, msgId, key);
     return true;
   });
 

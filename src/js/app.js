@@ -266,7 +266,7 @@ function isSafeYahoo(sym) {
   if (!sym) return false;
   const s = String(sym).trim().toUpperCase();
   if (!s || s.length > 24) return false;
-  if (/^(WE|WITH|AT|ONE|MAJOR|FOR|ARE|THE|AND|OR|TO|IN|ON|BY|OF|A|AN)$/.test(s)) return false;
+  if (/^(WE|WITH|AT|ONE|MAJOR|FOR|ARE|THE|AND|OR|TO|IN|ON|BY|OF|A|AN|KIND|FUEL|CEO|PLAN|WORK|APR|SEE|THAI|SP|ELEC|JUST|CARD|ZOOM)$/.test(s)) return false;
   if (/^\d{4}$/.test(s)) return false;
   return /^[A-Z0-9][A-Z0-9.\-=]{0,22}$/.test(s);
 }

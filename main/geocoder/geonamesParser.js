@@ -56,6 +56,10 @@ const BLOCK_STEMS = new Set([
   'french', 'british', 'chinese', 'iranian', 'turkish', 'polish',
   'italian', 'spanish', 'greek', 'dutch', 'swedish', 'norwegian',
   'egyptian', 'lebanese', 'jordanian', 'saudi', 'qatari', 'emirati',
+  // Hebrew function words / stems that geocode to random towns
+  'מהווה', 'מדובר', 'שנים', 'שנה', 'השלימה', 'שלימה', 'שגרה', 'לשגרה',
+  'שבו', 'כבר', 'משבר', 'מדינה', 'המדינה', 'טורקי', 'הטורקי', 'וואלה',
+  'כרך', 'בכרך', 'ציון', 'מאזן',
 ]);
 
 /** Tiny / ambiguous aliases that need a locative cue or huge population */
