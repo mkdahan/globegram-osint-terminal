@@ -21,6 +21,9 @@ goto :do_update
 
 rem Compare local files vs GitHub master and pull only when remote is newer.
 :do_update
+rem OneDrive writes desktop.ini into .git\refs → fatal: bad object refs/desktop.ini
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '.git' -Recurse -Force -Filter 'desktop.ini' -ErrorAction SilentlyContinue | ForEach-Object { attrib -s -h -r $_.FullName >$null 2>&1; Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }; git update-ref -d refs/desktop.ini 2>$null; git update-ref -d refs/heads/desktop.ini 2>$null" >nul 2>nul
+
 echo [update] Checking GitHub for a newer version...
 git fetch origin master
 if errorlevel 1 (
